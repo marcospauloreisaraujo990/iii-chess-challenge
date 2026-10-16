@@ -159,7 +159,28 @@ requirements). Se alguém mudar um desses valores por engano, o teste falha.
 
 ### Modificação significativa
 
-*(A preencher na Sprint 3: Marcos.)*
+O python-chess só conhece as regras: gera os lances legais, mas não sabe qual é o melhor. A
+escolha do lance é toda feita por código da equipe, em `engine/evaluation.py` e `engine/search.py`:
+
+- **Função de avaliação própria** (`evaluate`): soma o material (peão 100, cavalo 320, bispo 330,
+  torre 500, dama 900) com tabelas de casas (PST) para cada peça. Elas premiam peões e cavalos no
+  centro, bispos em casas centrais, torres na 7ª fileira e o rei protegido na ala do roque, e
+  penalizam peças no canto. A nota é sempre do ponto de vista de quem joga (convenção do Negamax).
+- **Negamax com poda Alfa-Beta** (`negamax`): olha a árvore de lances e descarta os ramos que o
+  adversário nunca deixaria acontecer. Mate é pontuado como `MATE_SCORE - ply`, então o motor
+  prefere o mate mais rápido e adia o mate que sofre. Repetição, regra dos 50 lances e material
+  insuficiente contam como empate.
+- **Aprofundamento iterativo com limite de tempo** (`search`): busca na profundidade 1, 2, 3…
+  enquanto houver tempo e devolve o lance da última profundidade completa. O relógio é conferido
+  a cada 256 posições, e o motor não começa uma profundidade que não terminaria.
+- **Ordenação de lances** (`order_moves`): primeiro o melhor lance da profundidade anterior,
+  depois promoções e capturas por MVV-LVA (vítima mais valiosa, atacante menos valioso). Uma
+  ordem boa faz a poda Alfa-Beta cortar muito mais cedo.
+- **Busca de quiescência** (`quiescence`): no fim da árvore, o motor continua olhando as capturas
+  até a posição ficar calma. Isso evita o "efeito horizonte", por exemplo trocar a dama por um
+  peão defendido achando que ganhou material.
+- **Tablebases dentro da busca**: com 5 peças ou menos, a busca consulta `syzygy.probe_wdl()` e
+  usa o resultado teórico (vitória, empate ou derrota) em vez de calcular.
 
 Como o projeto usa python-chess (GPLv3), a equipe deve decidir a licença do repositório antes da
 entrega. A GPLv3 é a escolha compatível.

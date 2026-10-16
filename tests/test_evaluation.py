@@ -36,10 +36,24 @@ class TestEvaluation(unittest.TestCase):
         board = chess.Board(SEM_DAMA_PRETA.format(vez="b"))
         self.assertLess(evaluate(board), -500)
 
-    # TODO (Marcos):
-    #   - peça a mais para as pretas
-    #   - cavalo no centro vale mais que cavalo no canto (PST)
-    #   - posição espelhada (chess.Board.mirror) dá a mesma nota
+    @pendente
+    def test_peca_a_mais_para_as_pretas(self):
+        # Posição inicial sem a torre branca de a1.
+        board = chess.Board("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/1NBQKBNR b Kkq - 0 1")
+        self.assertGreater(evaluate(board), 300)
+        board.turn = chess.WHITE
+        self.assertLess(evaluate(board), -300)
+
+    @pendente
+    def test_cavalo_no_centro_vale_mais_que_no_canto(self):
+        centro = chess.Board("4k3/8/8/8/4N3/8/8/4K3 w - - 0 1")
+        canto = chess.Board("4k3/8/8/8/8/8/8/N3K3 w - - 0 1")
+        self.assertGreater(evaluate(centro), evaluate(canto))
+
+    @pendente
+    def test_posicao_espelhada_da_a_mesma_nota(self):
+        board = chess.Board("r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4")
+        self.assertEqual(evaluate(board), evaluate(board.mirror()))
 
 
 if __name__ == "__main__":
