@@ -1,0 +1,8 @@
+# Quebra de linha normalizada entre Windows, Mac e Linux
+* text=auto
+
+# Binários
+*.bin binary
+*.rtbw binary
+*.rtbz binary
+*.exe binary

@@ -1,0 +1,8 @@
+STOCKFISH — SÓ PARA OS TESTES (tests/simulate_match.py, card do Léo, Sprint 3)
+
+O Stockfish NÃO faz parte do nosso motor: é apenas o adversário de treino que
+mede se o bot trava, faz lance ilegal ou estoura o tempo.
+
+Coloque aqui o executável baixado de stockfishchess.org
+(ex.: assets/stockfish/stockfish-windows-x86-64-avx2.exe).
+Fica fora do Git (.gitignore).

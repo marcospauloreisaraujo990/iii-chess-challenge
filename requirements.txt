@@ -1,0 +1,4 @@
+# Única dependência do projeto (card "Estrutura inicial"): python-chess.
+# Instale com internet, uma vez:   pip install -r requirements.txt
+# Para instalar sem internet, veja a seção "Rodar sem internet" do README.
+chess==1.11.2

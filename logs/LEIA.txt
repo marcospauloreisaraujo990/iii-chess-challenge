@@ -1,0 +1,7 @@
+LOGS DAS PARTIDAS (engine/logger.py, card do Junio)
+
+Um arquivo por partida: partida_AAAAMMDD_HHMMSS_<cor>.txt
+Cada lance nosso = uma linha com os 8 campos (número do lance, cor, lance,
+depth, nós, avaliação, PV, tempo). Entregar à banca ao fim de cada jogo.
+
+Os logs ficam fora do Git (.gitignore).

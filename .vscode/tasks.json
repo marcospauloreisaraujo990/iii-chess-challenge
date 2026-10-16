@@ -1,0 +1,37 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "1. Criar ambiente virtual (.venv) e instalar dependências",
+            "type": "shell",
+            "command": "python3 -m venv .venv && .venv/bin/python -m pip install -r requirements.txt",
+            "windows": {
+                "command": "python -m venv .venv && .venv\\Scripts\\python.exe -m pip install -r requirements.txt",
+                "options": { "shell": { "executable": "cmd.exe", "args": ["/d", "/c"] } }
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "2. Rodar os testes",
+            "type": "shell",
+            "command": "${command:python.interpreterPath}",
+            "args": ["-m", "unittest", "discover", "-s", "tests", "-t", ".", "-v"],
+            "group": { "kind": "test", "isDefault": true },
+            "problemMatcher": []
+        },
+        {
+            "label": "3. Baixar pacotes para instalar sem internet (pasta wheels/)",
+            "type": "shell",
+            "command": "${command:python.interpreterPath}",
+            "args": ["-m", "pip", "wheel", "-r", "requirements.txt", "-w", "wheels"],
+            "problemMatcher": []
+        },
+        {
+            "label": "4. Instalar sem internet (a partir da pasta wheels/)",
+            "type": "shell",
+            "command": "${command:python.interpreterPath}",
+            "args": ["-m", "pip", "install", "--no-index", "--find-links", "wheels", "-r", "requirements.txt"],
+            "problemMatcher": []
+        }
+    ]
+}
