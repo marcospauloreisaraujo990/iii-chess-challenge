@@ -7,3 +7,4 @@ partidas/
 tablebases/
 stockfish/
 .claude/settings.local.json
+log_emergencia.txt

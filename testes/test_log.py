@@ -69,3 +69,31 @@ def test_abrir_log_cria_a_pasta(tmp_path):
     arq = log.abrir_log(str(caminho))
     arq.close()
     assert caminho.exists()
+
+
+def test_pv_e_lance_como_chess_move(tmp_path):
+    """O python-chess devolve a PV como lista de chess.Move: o log precisa aceitar."""
+    import chess
+    caminho = tmp_path / "partida.txt"
+    arq = log.abrir_log(str(caminho))
+    pv = [chess.Move.from_uci("g1f3"), chess.Move.from_uci("d7d5")]
+    ok = log.registrar_lance(arq, 1, "brancas", pv[0], 20, 1, 0.1, pv, 1.0)
+    assert ok is True
+    assert "g1f3 | prof 20" in _ler(caminho)[0]
+    assert "pv g1f3 d7d5" in _ler(caminho)[0]
+    arq.close()
+
+
+def test_dado_estranho_nao_derruba(tmp_path):
+    caminho = tmp_path / "partida.txt"
+    arq = log.abrir_log(str(caminho))
+    assert log.registrar_lance(arq, 1, "brancas", "e2e4", 20, 1, 0.1, "e2e4", None) is False
+    arq.close()
+
+
+def test_abrir_log_sem_permissao_cai_para_emergencia(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    arq = log.abrir_log("/proc/nao-pode-criar/aqui.txt")
+    assert arq is not None
+    assert arq.name == log.LOG_EMERGENCIA
+    arq.close()
