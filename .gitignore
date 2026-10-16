@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+partidas/
+*.log
+tablebases/
+stockfish/
+.claude/settings.local.json
