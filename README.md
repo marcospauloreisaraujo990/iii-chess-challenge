@@ -3,7 +3,10 @@
 Equipe: Marcos Paulo, Junio, Léo.
 
 ## Projeto-base declarado
-- Motor: Stockfish (local, via UCI). Versão/commit: PREENCHER (Junio).
+- Motor: Stockfish 19 (local, via UCI). Release `sf_19` (05/09/2026), arquivo
+  `stockfish-linux-x86-64-universal.tar.gz` do GitHub oficial (official-stockfish/Stockfish).
+  SHA-256: `9defc0d4e55d49c65a6d042f3e571a39fcea499ade6dbe741b53b8c65e03611f`.
+  Fica em `stockfish/`, fora do Git. O código-fonte vem junto no mesmo arquivo (pasta `src/`).
 - Licença: GPLv3 (ver LICENSE). Código-fonte publicado neste repositório.
 
 ## O que é autoria nossa
