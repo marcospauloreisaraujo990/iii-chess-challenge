@@ -4,8 +4,12 @@ Liga tudo: lê o lance adversário (UCI), valida, consulta book.py, usa tempo.py
 chama o Stockfish (chess.engine) e grava o log. Robustez acima de tudo:
 nenhum erro pode fechar o programa e o estado deve ficar igual ao tabuleiro físico.
 """
+import os
+import sys
+
 import chess
 import chess.engine
+import chess.pgn
 
 
 def abrir_motor(caminho_stockfish, threads, hash_mb, syzygy_path):
@@ -155,9 +159,43 @@ def escolher_lance(board, motor, perfil, relogio):
     raise NotImplementedError
 
 
-def salvar_pgn(board, caminho):
-    """Salva a partida em PGN a cada lance."""
-    raise NotImplementedError
+def salvar_pgn(board, caminho, cabecalhos=None):
+    """Salva a partida em PGN a cada lance. Devolve True se salvou, False se falhou.
+
+    Como funciona, em linguagem simples:
+    - O PGN é reconstruído do zero a partir dos lances do tabuleiro (board.move_stack).
+      Assim ele sempre bate com o que o programa acha que é a partida, mesmo depois
+      de um `desfazer`.
+    - Se a posição inicial não era a padrão (comando `fen`), o python-chess grava o
+      FEN no cabeçalho e o PGN continua válido.
+    - A gravação é segura contra queda: escreve num arquivo temporário (.tmp), força
+      a ida ao disco e só então troca pelo definitivo. Se o programa cair no meio, o
+      PGN do lance anterior continua inteiro.
+    - Nunca levanta erro: falha de disco vira aviso na tela e a partida segue
+      (travar = derrota).
+
+    `cabecalhos` é opcional: dicionário como {"White": "Capablanca", "Black": "Fulano"}.
+    """
+    temporario = caminho + ".tmp"
+    try:
+        jogo = chess.pgn.Game.from_board(board)
+        jogo.headers["Event"] = "III Chess Challenge"
+        for chave, valor in (cabecalhos or {}).items():
+            jogo.headers[chave] = str(valor)
+        jogo.headers["Result"] = board.result(claim_draw=False)
+
+        pasta = os.path.dirname(caminho)
+        if pasta:
+            os.makedirs(pasta, exist_ok=True)
+        with open(temporario, "w", encoding="utf-8") as arquivo:
+            arquivo.write(str(jogo) + "\n\n")
+            arquivo.flush()
+            os.fsync(arquivo.fileno())
+        os.replace(temporario, caminho)
+        return True
+    except Exception as erro:
+        print(f"[pgn] não consegui salvar {caminho}: {erro}", file=sys.stderr)
+        return False
 
 
 def main():

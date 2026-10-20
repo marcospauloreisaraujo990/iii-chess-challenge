@@ -265,3 +265,85 @@ def test_comando_t_erro_no_relogio_nao_derruba(monkeypatch):
     lance, tela = _ler(chess.Board(), "t 12:34", "e2e4", ao_sincronizar=quebra)
     assert lance == chess.Move.from_uci("e2e4")
     assert "não foi alterado" in tela[0]
+
+
+# ---- salvar_pgn ----
+
+def _ler_pgn(caminho):
+    import chess.pgn
+    with open(caminho, encoding="utf-8") as f:
+        return chess.pgn.read_game(f)
+
+
+def test_pgn_guarda_os_lances_da_partida(tmp_path):
+    board = chess.Board()
+    for lance in ("e2e4", "e7e5", "g1f3"):
+        board.push_uci(lance)
+    caminho = str(tmp_path / "partida.pgn")
+    assert partida.salvar_pgn(board, caminho) is True
+    jogo = _ler_pgn(caminho)
+    assert [m.uci() for m in jogo.mainline_moves()] == ["e2e4", "e7e5", "g1f3"]
+    assert jogo.headers["Result"] == "*"
+
+
+def test_pgn_acompanha_o_desfazer(tmp_path):
+    board = chess.Board()
+    board.push_uci("e2e4")
+    board.push_uci("e7e5")
+    caminho = str(tmp_path / "partida.pgn")
+    partida.salvar_pgn(board, caminho)
+    board.pop()
+    partida.salvar_pgn(board, caminho)
+    assert [m.uci() for m in _ler_pgn(caminho).mainline_moves()] == ["e2e4"]
+
+
+def test_pgn_depois_do_comando_fen_guarda_a_posicao_inicial(tmp_path):
+    fen = "8/8/8/8/8/8/k7/4K2R w K - 0 1"
+    board = chess.Board(fen)
+    board.push_uci("h1h2")
+    caminho = str(tmp_path / "partida.pgn")
+    partida.salvar_pgn(board, caminho)
+    jogo = _ler_pgn(caminho)
+    assert jogo.board().fen() == chess.Board(fen).fen()
+    assert [m.uci() for m in jogo.mainline_moves()] == ["h1h2"]
+
+
+def test_pgn_registra_o_resultado_no_mate(tmp_path):
+    board = chess.Board()
+    for lance in ("f2f3", "e7e5", "g2g4", "d8h4"):
+        board.push_uci(lance)
+    caminho = str(tmp_path / "partida.pgn")
+    partida.salvar_pgn(board, caminho)
+    assert _ler_pgn(caminho).headers["Result"] == "0-1"
+
+
+def test_pgn_nao_deixa_arquivo_temporario(tmp_path):
+    caminho = tmp_path / "partida.pgn"
+    partida.salvar_pgn(chess.Board(), str(caminho))
+    assert caminho.exists()
+    assert not (tmp_path / "partida.pgn.tmp").exists()
+
+
+def test_pgn_cria_a_pasta_e_aceita_cabecalhos(tmp_path):
+    caminho = str(tmp_path / "partidas" / "jogo1.pgn")
+    ok = partida.salvar_pgn(chess.Board(), caminho, cabecalhos={"White": "Capablanca", "Black": "Rival"})
+    assert ok is True
+    jogo = _ler_pgn(caminho)
+    assert jogo.headers["White"] == "Capablanca"
+    assert jogo.headers["Black"] == "Rival"
+
+
+def test_pgn_falha_de_disco_nao_derruba_e_nao_perde_o_anterior(tmp_path, monkeypatch):
+    board = chess.Board()
+    board.push_uci("e2e4")
+    caminho = str(tmp_path / "partida.pgn")
+    assert partida.salvar_pgn(board, caminho) is True
+
+    board.push_uci("e7e5")
+
+    def disco_cheio(*args, **kwargs):
+        raise OSError("disco cheio")
+    monkeypatch.setattr(partida.os, "replace", disco_cheio)
+    assert partida.salvar_pgn(board, caminho) is False
+    # o arquivo bom do lance anterior continua inteiro
+    assert [m.uci() for m in _ler_pgn(caminho).mainline_moves()] == ["e2e4"]
