@@ -50,7 +50,8 @@ def test_abrir_motor_sem_pasta_de_tablebase_nao_configura_syzygy_e_avisa(monkeyp
     falso = MotorFalso()
     monkeypatch.setattr(partida.chess.engine.SimpleEngine, "popen_uci", lambda caminho: falso)
     partida.abrir_motor("qualquer", 1, 16, "/pasta/que/nao/existe")
-    assert falso.opcoes == {"Threads": 1, "Hash": 16}
+    # o limite de 5 peças vai sempre, mesmo sem pasta de tablebases
+    assert falso.opcoes == {"Threads": 1, "Hash": 16, "SyzygyProbeLimit": 5}
     assert "não existe" in capsys.readouterr().err
 
 
@@ -489,3 +490,49 @@ def test_atalho_com_bug_nao_derruba(monkeypatch, capsys):
     with pytest.raises(RuntimeError, match="tempo_provisorio_s"):
         partida.escolher_lance(chess.Board(), None, "15+10", RELOGIO)
     assert "atalho_tempo_zero falhou" in capsys.readouterr().err
+
+
+# ---------- correções da 3ª rodada de revisão ----------
+
+@precisa_stockfish
+def test_atraso_humano_e_descontado_do_maximo(motor, monkeypatch):
+    monkeypatch.setattr(tempo, "calcular_tempo", lambda *a: (100.0, 100.0))
+    visto = []
+    monkeypatch.setattr(tempo, "deve_parar", lambda d, alvo, maximo, *r: visto.append(maximo) or True)
+    relogio = {"restante_s": 1.0, "incremento_s": 0.0, "atraso_humano_s": 0.7}
+    partida.escolher_lance(chess.Board(), motor, "25+0", relogio)
+    assert visto and all(abs(m - 0.3) < 1e-9 for m in visto)   # 1,0 - 0,7
+
+
+@precisa_stockfish
+def test_atraso_maior_que_o_relogio_vira_emergencia(motor, monkeypatch):
+    monkeypatch.setattr(tempo, "calcular_tempo", lambda *a: (1.0, 1.0))
+    relogio = {"restante_s": 3.0, "incremento_s": 0.0, "atraso_humano_s": 8.0}
+    lance, info = partida.escolher_lance(chess.Board(), motor, "25+0", relogio)
+    assert lance in chess.Board().legal_moves and info["profundidade"] == 1
+
+
+def test_ctrl_c_durante_a_busca_usa_o_melhor_lance_visto(monkeypatch):
+    class AnaliseCtrlC:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            raise KeyboardInterrupt
+
+        def stop(self):
+            pass
+
+    class MotorCtrlC:
+        def analysis(self, board, limit):
+            return AnaliseCtrlC()
+    monkeypatch.setattr(tempo, "calcular_tempo", lambda *a: (0.1, 0.2))
+    lance, info = partida.escolher_lance(chess.Board(), MotorCtrlC(), "15+10", RELOGIO)
+    assert lance in chess.Board().legal_moves
+    assert info["motor_caiu"] is False   # Ctrl+C não é motor caído

@@ -243,7 +243,7 @@ def test_comando_t_erro_inesperado_nao_derruba(monkeypatch):
 def test_comando_t_retorno_estranho_nunca_chega_ao_relogio(monkeypatch):
     import tempo
     recebido = []
-    for ruim in (0, -5, None, True, "754", 12.5):
+    for ruim in (0, -5, None, True, "754", float("nan"), float("inf")):
         monkeypatch.setattr(tempo, "sincronizar", lambda texto, r=ruim: r)
         _ler(chess.Board(), "t 12:34", "e2e4", ao_sincronizar=recebido.append)
     assert recebido == []

@@ -4,6 +4,7 @@ Liga tudo: lê o lance adversário (UCI), valida, consulta book.py, usa tempo.py
 chama o Stockfish (chess.engine) e grava o log. Robustez acima de tudo:
 nenhum erro pode fechar o programa e o estado deve ficar igual ao tabuleiro físico.
 """
+import glob
 import math
 import os
 import sys
@@ -15,6 +16,7 @@ import chess.engine
 import chess.pgn
 
 import book
+import log
 import tempo
 
 
@@ -32,7 +34,7 @@ LIMIAR_QUEDA_CP = 0
 
 
 def _pecas_no_arquivo_syzygy(nome):
-    """'KQRvKR.rtbw' -> 6. Conta as letras das peças (tudo menos o 'v' e a extensão)."""
+    """'KQRvKR.rtbw' -> 5 (K+D+T contra K+T). Conta as letras das peças, sem o 'v' e a extensão."""
     base = nome.split(".")[0]
     return len(base.replace("v", ""))
 
@@ -52,7 +54,8 @@ def abrir_motor(caminho_stockfish, threads, hash_mb, syzygy_path=None):
     """
     motor = chess.engine.SimpleEngine.popen_uci(caminho_stockfish)
     try:
-        opcoes = {"Threads": threads, "Hash": hash_mb}
+        # O limite de 5 peças vai SEMPRE, com ou sem pasta de tablebases (regra do torneio).
+        opcoes = {"Threads": threads, "Hash": hash_mb, "SyzygyProbeLimit": MAX_PECAS_TABLEBASE}
         if syzygy_path:
             pastas = [p for p in syzygy_path.split(os.pathsep) if p]
             existentes = [p for p in pastas if os.path.isdir(p)]
@@ -60,7 +63,6 @@ def abrir_motor(caminho_stockfish, threads, hash_mb, syzygy_path=None):
                 print(f"[motor] AVISO: pasta de tablebases não existe: {ausente}", file=sys.stderr)
             if existentes:
                 opcoes["SyzygyPath"] = os.pathsep.join(existentes)
-                opcoes["SyzygyProbeLimit"] = MAX_PECAS_TABLEBASE
                 grandes = [f for pasta in existentes for f in os.listdir(pasta)
                            if f.endswith((".rtbw", ".rtbz")) and _pecas_no_arquivo_syzygy(f) > MAX_PECAS_TABLEBASE]
                 if grandes:
@@ -77,7 +79,7 @@ def abrir_motor(caminho_stockfish, threads, hash_mb, syzygy_path=None):
 def interpretar_entrada(texto, board):
     """Transforma o que o operador digitou em (tipo, valor). Não mexe no tabuleiro.
 
-    Tipos: "lance" (valor = chess.Move), "desfazer", "tab", "fen" (valor = texto do FEN),
+    Tipos: "lance" (valor = chess.Move), "desfazer", "tab", "go", "fen" (valor = texto do FEN),
     "tempo" (valor = "mm:ss" como digitado), "vazio" e "erro" (valor = mensagem para a tela).
     """
     texto = texto.strip()
@@ -90,6 +92,8 @@ def interpretar_entrada(texto, board):
         return "desfazer", None
     if comando == "tab":
         return "tab", None
+    if comando == "go" and len(palavras) == 1:
+        return "go", None
     if comando == "fen":
         if len(palavras) < 2:
             return "erro", "Uso: fen <posição FEN completa>"
@@ -122,15 +126,19 @@ def _falta_promocao(lance, board):
     return chess.square_rank(lance.to_square) in (0, 7)
 
 
-def ler_lance(board, ao_sincronizar=None, entrada=input, saida=print):
+GO = "go"  # o que ler_lance devolve quando o operador manda o motor pensar
+
+
+def ler_lance(board, ao_sincronizar=None, entrada=input, saida=print, pode_go=False):
     """Lê texto, valida com chess.Move.from_uci e board.legal_moves; entrada ruim só pede de novo.
 
-    Comandos: desfazer | tab | fen <posição> | t mm:ss
+    Comandos: desfazer | tab | fen <posição> | t mm:ss | go
 
     Devolve:
       - um chess.Move legal, quando o operador digitou um lance;
       - None, quando o tabuleiro mudou por comando (desfazer ou fen): quem chamou
-        precisa reler de quem é a vez antes de continuar.
+        precisa reler de quem é a vez antes de continuar;
+      - GO, só se `pode_go=True` e o operador digitou `go` (liberar o motor para pensar).
     `tab` e `t mm:ss` não encerram a leitura: mostram/atualizam e pedem de novo.
     `ao_sincronizar(segundos)` é chamado com o tempo restante que o `t mm:ss` informou.
     `entrada` e `saida` existem só para os testes (padrão: teclado e tela).
@@ -152,6 +160,10 @@ def ler_lance(board, ao_sincronizar=None, entrada=input, saida=print):
             continue
         if tipo == "erro":
             saida(valor)
+        elif tipo == "go":
+            if pode_go:
+                return GO
+            saida("'go' só vale quando o programa está esperando para pensar.")
         elif tipo == "tab":
             saida(str(board))
             saida(f"FEN: {board.fen()}")
@@ -183,10 +195,10 @@ def _tratar_comando_tempo(texto_mmss, ao_sincronizar, saida):
     """Passa 't mm:ss' para tempo.sincronizar (código do Marcos). Nunca derruba a partida.
 
     Comando de emergência digitado sob pressão: qualquer erro vira mensagem na tela,
-    e um valor estranho nunca chega ao relógio.
+    e um valor estranho nunca chega ao relógio. Aceita int ou float (754 ou 754.0).
+    `ao_sincronizar` pode devolver False para recusar o valor (ex.: operador não confirmou).
     """
     try:
-        import tempo
         segundos = tempo.sincronizar("t " + texto_mmss)
     except NotImplementedError:
         saida("Comando t ainda não disponível (tempo.sincronizar não foi implementado).")
@@ -197,17 +209,21 @@ def _tratar_comando_tempo(texto_mmss, ao_sincronizar, saida):
     except Exception as erro:  # erro inesperado no código de tempo: avisa e segue jogando
         saida(f"Erro no comando t ({type(erro).__name__}). O relógio não foi alterado.")
         return
-    if isinstance(segundos, bool) or not isinstance(segundos, int) or segundos <= 0:
+    if not _numero_positivo(segundos):
         saida("Tempo inválido. Use t mm:ss (exemplo: t 12:34). O relógio não foi alterado.")
         return
     if ao_sincronizar is None:
         saida(f"Tempo lido ({segundos} s), mas nenhum relógio está ligado: nada foi ajustado.")
         return
     try:
-        ao_sincronizar(segundos)
+        aceito = ao_sincronizar(float(segundos))
+    except EOFError:
+        raise  # teclado fechado: sobe para a partida salvar e sair
     except Exception as erro:
         saida(f"Erro ao ajustar o relógio ({type(erro).__name__}). O relógio não foi alterado.")
         return
+    if aceito is False:
+        return  # quem chamou já explicou na tela
     saida(f"Relógio ajustado para {segundos} s.")
 
 
@@ -235,6 +251,7 @@ def _alvo_e_maximo(board, relogio, tempo_provisorio_s):
         alvo, maximo = tempo.calcular_tempo(relogio["restante_s"], relogio["incremento_s"],
                                             board.fullmove_number, relogio["atraso_humano_s"])
         restante = relogio["restante_s"]
+        atraso = relogio["atraso_humano_s"]
     except NotImplementedError:
         if tempo_provisorio_s is None:
             raise RuntimeError("tempo.calcular_tempo ainda não existe: informe tempo_provisorio_s (só para testes).")
@@ -246,7 +263,16 @@ def _alvo_e_maximo(board, relogio, tempo_provisorio_s):
         print(f"[tempo] calcular_tempo devolveu valores inválidos ({alvo!r}, {maximo!r}) "
               f"com restante {restante!r}. Modo de emergência.", file=sys.stderr)
         return None
-    maximo = min(maximo, restante)  # nunca pensar mais do que o relógio tem
+    try:
+        # Nunca pensar mais do que sobra DEPOIS de anunciar, mover e apertar o relógio.
+        disponivel = restante - atraso
+    except TypeError:
+        disponivel = None
+    if not _numero_positivo(disponivel):
+        print(f"[tempo] não sobra tempo depois do atraso humano (restante {restante!r}, atraso {atraso!r}). "
+              f"Modo de emergência.", file=sys.stderr)
+        return None
+    maximo = min(maximo, disponivel)
     return min(alvo, maximo), maximo
 
 
@@ -364,6 +390,9 @@ def escolher_lance(board, motor, perfil, relogio, caminho_book=None, tempo_provi
                     break
             analise.stop()
             lance = analise.wait().move
+    except KeyboardInterrupt:
+        # Ctrl+C por engano não pode custar a partida: para a busca e usa o melhor lance visto.
+        print("[motor] Ctrl+C durante a busca: usando o melhor lance visto até agora.", file=sys.stderr)
     except Exception as erro:
         # Stockfish morreu, travou e o vigia o fechou, ou o protocolo falhou.
         motor_caiu = True
@@ -424,10 +453,326 @@ def salvar_pgn(board, caminho, cabecalhos=None):
         return False
 
 
-def main():
-    """Pergunta cor e perfil de tempo; laço da partida com try/except e reinício do motor se cair."""
-    raise NotImplementedError
+# ----------------------------------------------------------------------------------
+# Configuração. Nenhum valor de TEMPO tem padrão aqui (regra 4 do CLAUDE.md): atraso
+# humano, tempo de teste e folga do watchdog vêm do operador ou do ambiente.
+# Threads e Hash usam os padrões do próprio Stockfish (1 thread, 16 MB); os valores
+# finais saem dos testes do Léo.
+# ----------------------------------------------------------------------------------
+# Caminhos ancorados na pasta do programa: abrir de outra pasta não muda o comportamento.
+_RAIZ = os.path.dirname(os.path.abspath(__file__))
+PASTA_STOCKFISH = os.path.join(_RAIZ, "stockfish")
+CAMINHO_BOOK = os.path.join(_RAIZ, "book", "book.bin")
+PASTA_TABLEBASES = os.path.join(_RAIZ, "tablebases")
+PASTA_PARTIDAS = os.path.join(_RAIZ, "partidas")
+THREADS = 1
+HASH_MB = 16
+TENTATIVAS_REINICIO_MOTOR = 3
+
+
+def _achar_stockfish():
+    """Primeiro executável stockfish-* da pasta stockfish/ (ignora .md, .txt e pastas)."""
+    for caminho in sorted(glob.glob(os.path.join(PASTA_STOCKFISH, "stockfish-*"))):
+        if os.path.isfile(caminho) and os.access(caminho, os.X_OK) and not caminho.endswith((".md", ".txt")):
+            return caminho
+    return None
+
+
+def _numero_do_ambiente(nome):
+    """Lê um número (segundos) de uma variável de ambiente; None se não existir ou for inválido."""
+    texto = os.environ.get(nome)
+    if texto is None:
+        return None
+    try:
+        valor = float(texto)
+    except ValueError:
+        print(f"[config] {nome}={texto!r} não é um número. Ignorado.", file=sys.stderr)
+        return None
+    return valor if math.isfinite(valor) and valor >= 0 else None
+
+
+def _mmss(segundos):
+    segundos = max(0, int(round(segundos)))
+    return f"{segundos // 60}:{segundos % 60:02d}"
+
+
+def _perguntar_cor(entrada, saida):
+    while True:
+        resposta = entrada("Nossa cor (brancas/pretas): ").strip().lower()
+        if resposta in ("b", "brancas", "branca"):
+            return chess.WHITE
+        if resposta in ("p", "pretas", "preta"):
+            return chess.BLACK
+        saida("Digite 'brancas' ou 'pretas'.")
+
+
+def _perguntar_perfil(entrada, saida, cor):
+    """Pergunta o perfil e devolve a chave de tempo.PERFIS. Perfil errado falha AQUI, na largada."""
+    while True:
+        resposta = entrada("Perfil de relógio (15+10 / 25+0 / armageddon): ").strip().lower()
+        if resposta == "armageddon":
+            resposta = "armageddon_brancas" if cor == chess.WHITE else "armageddon_pretas"
+        if resposta in tempo.PERFIS:
+            return resposta
+        saida("Perfil desconhecido. Opções: 15+10, 25+0, armageddon.")
+
+
+def _perguntar_atraso(entrada, saida):
+    """Atraso humano por lance (anunciar, repetir, mover, apertar o relógio), em segundos."""
+    atraso = _numero_do_ambiente("CAPABLANCA_ATRASO_HUMANO_S")
+    if atraso is not None:
+        return atraso
+    while True:
+        resposta = entrada("Atraso humano estimado por lance, em segundos (sai dos testes do Léo): ").strip()
+        try:
+            atraso = float(resposta.replace(",", "."))
+        except ValueError:
+            atraso = None
+        if atraso is not None and math.isfinite(atraso) and atraso >= 0:
+            return atraso
+        saida("Digite um número, por exemplo 8 ou 6.5.")
+
+
+def _reiniciar_motor(motor_antigo, reabrir_motor, saida):
+    """Fecha o motor velho (se der) e tenta abrir um novo. Devolve o motor ou None."""
+    if motor_antigo is not None:
+        try:
+            motor_antigo.quit()
+        except Exception:
+            try:
+                motor_antigo.close()
+            except Exception:
+                pass
+    if reabrir_motor is None:
+        return None
+    for tentativa in range(1, TENTATIVAS_REINICIO_MOTOR + 1):
+        try:
+            novo = reabrir_motor()
+            saida(f"Motor reiniciado (tentativa {tentativa}).")
+            return novo
+        except Exception as erro:
+            saida(f"Falha ao reiniciar o motor ({type(erro).__name__}: {erro}).")
+    return None
+
+
+def jogar_partida(minha_cor, chave_perfil, relogio, motor, entrada=input, saida=print,
+                  pasta_partidas=PASTA_PARTIDAS, caminho_book=None, tempo_provisorio_s=None,
+                  folga_watchdog_s=None, reabrir_motor=None, agora=time.monotonic):
+    """Laço da partida. Devolve o resultado ("1-0", "0-1", "1/2-1/2").
+
+    Cada volta: se é a vez do adversário, lê o lance do operador (com os comandos de
+    emergência); se é a nossa, o motor escolhe. Depois de cada lance: log, PGN e relógio.
+    O tabuleiro físico é a fonte da verdade: `desfazer` e `fen` corrigem o do programa.
+
+    Depois de um `desfazer` ou `fen` na NOSSA vez, o motor NÃO pensa sozinho: o programa
+    espera o operador acertar a posição e digitar `go`. (Sem isso, ao corrigir o lance
+    errado do adversário, o motor gastaria tempo pensando sobre a posição errada.)
+
+    Relógio: guardado aqui. A cada lance nosso desconta o tempo REAL desde que o lance do
+    adversário foi aceito (inclui book, cálculo, motor reiniciado, operador digitando),
+    mais o atraso humano, e soma o incremento. `t mm:ss` corrige o valor.
+
+    Robustez (travar = derrota): erro em qualquer volta é mostrado e a partida segue; se o
+    motor cair, é reiniciado; se não voltar, o operador digita também o nosso lance
+    ("modo manual"). EOFError (teclado fechado) sai limpo, com log e PGN já salvos.
+
+    O log tem só os NOSSOS lances (são eles que têm profundidade, nós e avaliação). Os
+    lances do adversário ficam no PGN. Um lance nosso desfeito continua no log.
+    """
+    board = chess.Board()
+    carimbo = time.strftime("%Y-%m-%d_%H-%M-%S")
+    caminho_pgn = os.path.join(pasta_partidas, carimbo + ".pgn")
+    arquivo_log = log.abrir_log(os.path.join(pasta_partidas, carimbo + ".txt"))
+    nome_nosso, nome_rival = "Capablanca", "Adversario"
+    cabecalhos = {"White": nome_nosso if minha_cor == chess.WHITE else nome_rival,
+                  "Black": nome_nosso if minha_cor == chess.BLACK else nome_rival,
+                  "TimeControl": chave_perfil, "Date": time.strftime("%Y.%m.%d")}
+    cor_texto = "brancas" if minha_cor == chess.WHITE else "pretas"
+    inicio_perfil_s, incremento_perfil_s = tempo.PERFIS[chave_perfil]
+    erros_seguidos = 0
+    esperando_go = False
+    inicio_da_vez = agora()   # quando o nosso relógio passou a correr nesta vez
+    nossos_lances = 0
+
+    def ao_sincronizar(segundos):
+        """Aplica o `t mm:ss`. Pede confirmação se passar do máximo possível (provável erro)."""
+        maximo_possivel = inicio_perfil_s + incremento_perfil_s * nossos_lances
+        if segundos > maximo_possivel:
+            saida(f"ATENÇÃO: {_mmss(segundos)} é MAIS do que o máximo possível agora "
+                  f"({_mmss(maximo_possivel)}). Provável erro de digitação.")
+            if entrada("Confirma mesmo assim? (s/N): ").strip().lower() not in ("s", "sim"):
+                saida("Relógio NÃO alterado.")
+                return False
+        relogio["restante_s"] = segundos
+        return True
+
+    try:
+        while True:
+            while board.outcome() is None:
+                try:
+                    if board.turn == minha_cor:
+                        # --- nossa vez ---
+                        pensar = True
+                        if esperando_go:
+                            saida("Posição corrigida? Digite 'go' para o motor pensar "
+                                  "(ou desfazer / tab / fen / t mm:ss).")
+                            pedido = ler_lance(board, ao_sincronizar, entrada, saida, pode_go=True)
+                            if pedido == GO:
+                                esperando_go = False
+                            else:
+                                pensar = False
+                                if pedido is None:  # desfazer/fen: o tabuleiro mudou
+                                    esperando_go = board.turn == minha_cor
+                                else:
+                                    saida("É a vez do motor: digite 'go', ou corrija com desfazer.")
+                        if pensar:
+                            if motor is None:
+                                motor = _reiniciar_motor(None, reabrir_motor, saida)
+                            lance, info, manual = None, None, False
+                            if motor is not None:
+                                # o tempo que já passou nesta vez (inclusive de tentativas anteriores) já foi gasto
+                                relogio_vez = dict(relogio)
+                                relogio_vez["restante_s"] = max(0.0, relogio["restante_s"] - (agora() - inicio_da_vez))
+                                saida(f"Pensando... (relógio estimado {_mmss(relogio_vez['restante_s'])})")
+                                try:
+                                    lance, info = escolher_lance(board, motor, chave_perfil, relogio_vez, caminho_book,
+                                                                 tempo_provisorio_s, folga_watchdog_s)
+                                except Exception as erro:
+                                    saida(f"Erro ao escolher o lance ({type(erro).__name__}: {erro}).")
+                                    motor = _reiniciar_motor(motor, reabrir_motor, saida)
+                                else:
+                                    if info["motor_caiu"]:
+                                        saida("O motor travou ou caiu. Reiniciando.")
+                                        motor = _reiniciar_motor(motor, reabrir_motor, saida)
+                            if lance is None:
+                                manual = True
+                                saida("MODO MANUAL: o motor não está disponível. "
+                                      "Digite o lance que NÓS vamos jogar (UCI).")
+                                lance = ler_lance(board, ao_sincronizar, entrada, saida)
+                                if lance is not None:
+                                    info = {"book": False, "profundidade": 0, "nos": 0, "avaliacao": "-",
+                                            "pv": [lance], "tempo_s": 0.0}
+                                else:  # desfazer/fen: o tabuleiro mudou, espera o 'go'
+                                    esperando_go = board.turn == minha_cor
+                            if lance is not None:
+                                numero = board.fullmove_number
+                                saida(f">>> JOGUE: {lance.uci()}   (lance {numero}, {cor_texto}"
+                                      + ("" if manual else f", prof {info['profundidade']}, aval {info['avaliacao']}, "
+                                         f"{info['tempo_s']:.1f} s{', book' if info['book'] else ''}") + ")")
+                                log.registrar_lance(arquivo_log, numero, cor_texto, lance, info["profundidade"],
+                                                    info["nos"], info["avaliacao"], info["pv"], info["tempo_s"],
+                                                    book=info["book"])
+                                board.push(lance)
+                                # gasto real desta vez (nunca menos do que o motor declarou) + atraso humano - incremento
+                                gasto = max(info["tempo_s"], agora() - inicio_da_vez)
+                                relogio["restante_s"] = max(0.0, relogio["restante_s"] - gasto
+                                                            - relogio["atraso_humano_s"] + relogio["incremento_s"])
+                                nossos_lances += 1
+                                if relogio["restante_s"] <= 0:
+                                    saida("ATENÇÃO: relógio estimado em 0:00. Peça ao conferente o tempo real "
+                                          "e digite t mm:ss.")
+                    else:
+                        # --- vez do adversário ---
+                        lance = ler_lance(board, ao_sincronizar, entrada, saida)
+                        if lance is None:
+                            esperando_go = board.turn == minha_cor
+                        else:
+                            board.push(lance)
+                            esperando_go = False
+                            inicio_da_vez = agora()  # agora o nosso relógio corre
+                    salvar_pgn(board, caminho_pgn, cabecalhos)
+                    erros_seguidos = 0
+                except EOFError:
+                    raise
+                except Exception as erro:
+                    erros_seguidos += 1
+                    saida(f"Erro inesperado ({type(erro).__name__}: {erro}). A partida continua.")
+                    if erros_seguidos >= 10:
+                        raise  # 10 erros seguidos: algo está quebrado de verdade, não adianta girar
+            resultado = board.result()
+            saida(f"Fim da partida: {resultado} ({board.outcome().termination.name}). "
+                  f"Se foi erro de digitação, digite 'desfazer'. Enter para encerrar.")
+            try:
+                resposta = entrada("fim> ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                break
+            if resposta == "desfazer" and board.move_stack:
+                board.pop()
+                esperando_go = board.turn == minha_cor
+                salvar_pgn(board, caminho_pgn, cabecalhos)
+                continue
+            break
+        return resultado
+    finally:
+        salvar_pgn(board, caminho_pgn, cabecalhos)
+        if arquivo_log is not None:
+            arquivo_log.close()
+        if motor is not None:
+            try:
+                motor.quit()
+            except Exception:
+                pass
+
+
+def main(entrada=input, saida=print):
+    """Pergunta cor e perfil de tempo; laço da partida com try/except e reinício do motor se cair.
+
+    Devolve o código de saída: 0 = partida terminou, 1 = teclado fechado no meio, 2 = não
+    dá para começar (falta Stockfish ou tempo.py). Falhar na largada é de propósito: é bem
+    melhor descobrir agora do que no meio da partida.
+    """
+    caminho_stockfish = _achar_stockfish()
+    if caminho_stockfish is None:
+        saida(f"Stockfish não encontrado em {PASTA_STOCKFISH}/. Veja o README (como instalar).")
+        return 2
+
+    try:
+        cor = _perguntar_cor(entrada, saida)
+        chave_perfil = _perguntar_perfil(entrada, saida, cor)
+        atraso = _perguntar_atraso(entrada, saida)
+    except (EOFError, KeyboardInterrupt):
+        saida("Entrada encerrada antes de começar a partida.")
+        return 1
+    inicio_s, incremento_s = tempo.PERFIS[chave_perfil]
+    relogio = {"restante_s": float(inicio_s), "incremento_s": float(incremento_s), "atraso_humano_s": atraso}
+
+    tempo_provisorio_s = _numero_do_ambiente("CAPABLANCA_TEMPO_PROVISORIO_S")
+    folga_watchdog_s = _numero_do_ambiente("CAPABLANCA_FOLGA_WATCHDOG_S")
+    try:
+        tempo.calcular_tempo(relogio["restante_s"], relogio["incremento_s"], 1, atraso)
+    except NotImplementedError:
+        if tempo_provisorio_s is None:
+            saida("tempo.py ainda não está implementado (Marcos). Para TESTAR, defina a variável "
+                  "CAPABLANCA_TEMPO_PROVISORIO_S (segundos por lance). Isso NÃO vale para o torneio.")
+            return 2
+        saida(f"*** MODO TESTE: tempo provisório de {tempo_provisorio_s} s por lance. NÃO USAR NO TORNEIO. ***")
+    except Exception:
+        pass  # bug no tempo.py: cada lance cai no modo de emergência, mas a partida abre
+
+    saida("Dica: se o motor travar no torneio, o programa o reinicia sozinho.")
+    if folga_watchdog_s is None:
+        saida("AVISO: watchdog desligado (defina CAPABLANCA_FOLGA_WATCHDOG_S quando o grupo decidir a folga).")
+
+    book_ok = CAMINHO_BOOK if os.path.isfile(CAMINHO_BOOK) else None
+    if book_ok is None:
+        saida(f"Aviso: book não encontrado em {CAMINHO_BOOK}. Jogando sem book.")
+
+    def reabrir():
+        return abrir_motor(caminho_stockfish, THREADS, HASH_MB, PASTA_TABLEBASES)
+
+    try:
+        motor = reabrir()
+    except Exception as erro:
+        saida(f"Não consegui abrir o Stockfish ({type(erro).__name__}: {erro}).")
+        return 2
+    try:
+        jogar_partida(cor, chave_perfil, relogio, motor, entrada, saida, PASTA_PARTIDAS, book_ok,
+                      tempo_provisorio_s, folga_watchdog_s, reabrir)
+    except EOFError:
+        saida("Entrada encerrada. Log e PGN foram salvos em partidas/.")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
