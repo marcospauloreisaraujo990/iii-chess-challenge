@@ -24,6 +24,17 @@ precisa_stockfish = pytest.mark.skipif(STOCKFISH is None, reason="Stockfish não
 RELOGIO = {"restante_s": 900, "incremento_s": 10, "atraso_humano_s": 5}
 
 
+@pytest.fixture(autouse=True)
+def _tempo_py_como_esqueleto(monkeypatch):
+    """Estes testes são do partida.py, não da gestão de tempo: o tempo do lance vem do
+    `tempo_provisorio_s` de cada teste. Sem isto, com o tempo.py pronto, cada teste faria o
+    Stockfish pensar o tempo de uma partida de verdade (~25 s). Quem quiser testar a ligação
+    com o tempo.py faz o próprio monkeypatch de calcular_tempo, que substitui este."""
+    def esqueleto(*a):
+        raise NotImplementedError
+    monkeypatch.setattr(tempo, "calcular_tempo", esqueleto)
+
+
 # ---------- abrir_motor (motor falso, sem processo) ----------
 
 class MotorFalso:
