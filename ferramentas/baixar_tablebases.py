@@ -10,7 +10,12 @@ De onde vem cada coisa:
         https://tablebase.lichess.ovh/tables/standard/3-4-5-dtz/   (.rtbz, ~588 MB)
   - A lista oficial de arquivos e os MD5 vêm de uma fonte INDEPENDENTE (espelho do Sesse):
         http://tablebase.sesse.net/syzygy/3-4-5/checksum.md5
-    Se o arquivo da Lichess tiver o MD5 diferente do espelho, ele é descartado.
+    Se o arquivo da Lichess tiver o MD5 diferente da lista, ele é descartado.
+  - Essa lista está FIXADA no Git (ferramentas/dados/tablebases-3-4-5.md5), então a
+    conferência não depende da rede. O espelho só atende por HTTP (sem criptografia), mas isso
+    não abre brecha: os arquivos vêm da Lichess por HTTPS, e a lista só serve para detectar
+    corrupção. Se alguém alterasse a lista no caminho, o resultado seria uma recusa, nunca
+    um arquivo falso aceito. Para atualizar a lista fixada, use --atualizar-lista.
 
 Regras do torneio que este script garante:
   - Só entram arquivos de até 5 peças. Qualquer nome com mais de 5 peças é recusado.
@@ -32,6 +37,7 @@ import urllib.request
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PASTA_PADRAO = os.path.join(RAIZ, "tablebases")
 URL_MD5 = "http://tablebase.sesse.net/syzygy/3-4-5/checksum.md5"
+LISTA_FIXADA = os.path.join(RAIZ, "ferramentas", "dados", "tablebases-3-4-5.md5")
 URL_ARQUIVOS = {
     ".rtbw": "https://tablebase.lichess.ovh/tables/standard/3-4-5-wdl/",
     ".rtbz": "https://tablebase.lichess.ovh/tables/standard/3-4-5-dtz/",
@@ -110,10 +116,19 @@ def main(argv=None):
     parser.add_argument("--pasta", default=PASTA_PADRAO)
     parser.add_argument("--so-conferir", action="store_true", help="não baixa, só confere o que já está na pasta")
     parser.add_argument("--paralelo", type=int, default=4, help="downloads ao mesmo tempo (padrão 4)")
+    parser.add_argument("--atualizar-lista", action="store_true",
+                        help="busca a lista de MD5 de novo (HTTP) e regrava a lista fixada no Git")
     args = parser.parse_args(argv)
 
-    with urllib.request.urlopen(URL_MD5, timeout=60) as resposta:
-        esperado = ler_md5_oficial(resposta.read().decode("ascii"))
+    if args.atualizar_lista or not os.path.isfile(LISTA_FIXADA):
+        with urllib.request.urlopen(URL_MD5, timeout=60) as resposta:
+            texto = resposta.read().decode("ascii")
+        ler_md5_oficial(texto)   # valida (e recusa 6+ peças) antes de gravar
+        with open(LISTA_FIXADA, "w", encoding="ascii") as arquivo:
+            arquivo.write(texto)
+        print(f"lista de MD5 gravada em {LISTA_FIXADA}")
+    with open(LISTA_FIXADA, encoding="ascii") as arquivo:
+        esperado = ler_md5_oficial(arquivo.read())
     print(f"lista oficial: {len(esperado)} arquivos (3 a {MAX_PECAS} peças)")
     os.makedirs(args.pasta, exist_ok=True)
 
