@@ -44,8 +44,9 @@ def motor_com_lances(monkeypatch, *lances, **kw):
     fila = [chess.Move.from_uci(l) for l in lances]
     chamadas = []
 
-    def falso(board, motor, perfil, relogio, caminho_book=None, tempo_provisorio_s=None, folga_watchdog_s=None):
-        chamadas.append({"fen": board.fen(), "relogio": dict(relogio), "perfil": perfil})
+    def falso(board, motor, perfil, relogio, caminho_book=None, tempo_provisorio_s=None, folga_watchdog_s=None,
+              economia=False):
+        chamadas.append({"fen": board.fen(), "relogio": dict(relogio), "perfil": perfil, "economia": economia})
         lance = fila.pop(0)
         return lance, info_falsa(lance, **kw)
     monkeypatch.setattr(partida, "escolher_lance", falso)
@@ -655,3 +656,166 @@ def test_eof_nas_perguntas_da_largada_sai_com_codigo_1(monkeypatch):
 def test_caminhos_nao_dependem_da_pasta_de_execucao():
     for caminho in (partida.PASTA_STOCKFISH, partida.CAMINHO_BOOK, partida.PASTA_TABLEBASES, partida.PASTA_PARTIDAS):
         assert os.path.isabs(caminho)
+
+
+# ====================== modo economia (ligação com o tempo.py do Marcos) ======================
+
+def test_modo_economia_verdadeiro_chega_ao_escolher_lance_e_aparece_na_tela(tmp_path, monkeypatch):
+    chamadas = motor_com_lances(monkeypatch, "e2e4")
+    monkeypatch.setattr(tempo, "modo_economia", lambda historico, material: True)
+    tela = []
+    with pytest.raises(EOFError):
+        partida.jogar_partida(chess.WHITE, "15+10", _relogio(), MotorQualquer(), entrada=Teclado(),
+                              saida=tela.append, pasta_partidas=str(tmp_path), agora=RelogioFalso())
+    assert chamadas[0]["economia"] is True
+    assert any("[modo economia]" in linha for linha in tela)
+
+
+def test_modo_economia_falso_por_padrao(tmp_path, monkeypatch):
+    chamadas = motor_com_lances(monkeypatch, "e2e4")
+    with pytest.raises(EOFError):
+        jogar(tmp_path, chess.WHITE, Teclado())
+    assert chamadas[0]["economia"] is False
+
+
+def test_bug_no_modo_economia_nao_derruba_a_partida(tmp_path, monkeypatch):
+    chamadas = motor_com_lances(monkeypatch, "e2e4")
+
+    def quebra(*a):
+        raise ZeroDivisionError("bug")
+    monkeypatch.setattr(tempo, "modo_economia", quebra)
+    with pytest.raises(EOFError):
+        jogar(tmp_path, chess.WHITE, Teclado())
+    assert chamadas[0]["economia"] is False
+
+
+def test_historico_de_avaliacoes_guarda_centipawns_e_none_para_book_e_mate(tmp_path, monkeypatch):
+    vistos = []
+    monkeypatch.setattr(tempo, "modo_economia", lambda historico, material: vistos.append(list(historico)) or False)
+    avaliacoes = iter([0.30, "#3", 0.0, -1.25])
+    livros = iter([False, False, True, False])
+
+    def falso(board, motor, perfil, relogio, *a, **k):
+        lance = list(board.legal_moves)[0]
+        info = info_falsa(lance)
+        info["avaliacao"] = next(avaliacoes)
+        info["book"] = next(livros)
+        return lance, info
+    monkeypatch.setattr(partida, "escolher_lance", falso)
+    with pytest.raises(EOFError):
+        jogar(tmp_path, chess.WHITE, Teclado("a7a6", "b7b6", "c7c6"))
+    # antes do 1º lance: []. Depois: 30, None (mate), None (book, mesmo com 0.0), e por fim -125
+    assert vistos[0] == []
+    assert vistos[1] == [30]
+    assert vistos[2] == [30, None]
+    assert vistos[3] == [30, None, None]
+
+
+precisa_stockfish_main = pytest.mark.skipif(STOCKFISH is None, reason="Stockfish não instalado em stockfish/")
+
+
+@precisa_stockfish_main
+def test_economia_corta_o_alvo_pela_metade_no_escolher_lance_real(monkeypatch):
+    monkeypatch.setattr(tempo, "calcular_tempo", lambda *a: (0.4, 0.8))
+    alvos = []
+    monkeypatch.setattr(tempo, "deve_parar", lambda d, alvo, maximo, *r: alvos.append((alvo, maximo)) or True)
+    motor = partida.abrir_motor(STOCKFISH, 1, 16)
+    try:
+        partida.escolher_lance(chess.Board(), motor, "15+10", _relogio(), economia=True)
+        partida.escolher_lance(chess.Board(), motor, "15+10", _relogio(), economia=False)
+    finally:
+        motor.quit()
+    assert alvos[0] == (0.4 * tempo.FATOR_ECONOMIA, 0.8)   # alvo cortado, máximo (limite duro) intacto
+    assert alvos[1] == (0.4, 0.8)
+
+
+@precisa_stockfish_main
+def test_economia_nunca_corta_abaixo_do_tempo_minimo_nem_acima_do_maximo(monkeypatch):
+    monkeypatch.setattr(tempo, "calcular_tempo", lambda *a: (0.06, 0.3))
+    alvos = []
+    monkeypatch.setattr(tempo, "deve_parar", lambda d, alvo, maximo, *r: alvos.append(alvo) or True)
+    motor = partida.abrir_motor(STOCKFISH, 1, 16)
+    try:
+        partida.escolher_lance(chess.Board(), motor, "15+10", _relogio(), economia=True)
+    finally:
+        motor.quit()
+    assert alvos[0] == tempo.TEMPO_MINIMO_S   # 0.06 * 0.5 = 0.03 < 0.05: sobe para o piso
+
+
+# ---- casos de borda apontados pelo testador (economia) ----
+
+def test_historico_esquece_a_avaliacao_do_lance_desfeito(tmp_path, monkeypatch):
+    vistos = []
+    monkeypatch.setattr(tempo, "modo_economia", lambda historico, material: vistos.append(list(historico)) or False)
+    avaliacoes = iter([0.30, 0.10, 0.20])
+
+    def falso(board, motor, perfil, relogio, *a, **k):
+        lance = list(board.legal_moves)[0]
+        info = info_falsa(lance)
+        info["avaliacao"] = next(avaliacoes)
+        return lance, info
+    monkeypatch.setattr(partida, "escolher_lance", falso)
+    with pytest.raises(EOFError):
+        # nosso 1º lance (30), adversário a7a6, nosso 2º lance (10), desfazer (tira o 2º), go, nosso 2º de novo (20)
+        jogar(tmp_path, chess.WHITE, Teclado("a7a6", "desfazer", "go"))
+    assert vistos[0] == []
+    assert vistos[1] == [30]
+    assert vistos[2] == [30]        # depois do desfazer: só o primeiro; o 10 do lance desfeito saiu
+
+
+def test_historico_zera_depois_do_comando_fen(tmp_path, monkeypatch):
+    vistos = []
+    monkeypatch.setattr(tempo, "modo_economia", lambda historico, material: vistos.append(list(historico)) or False)
+
+    def falso(board, motor, perfil, relogio, *a, **k):
+        lance = list(board.legal_moves)[0]
+        return lance, info_falsa(lance)
+    monkeypatch.setattr(partida, "escolher_lance", falso)
+    fen = "8/8/8/8/8/8/k7/4K2R w K - 0 1"
+    with pytest.raises(EOFError):
+        jogar(tmp_path, chess.WHITE, Teclado("a7a6", "fen " + fen, "go"))
+    assert vistos[0] == [] and len(vistos[1]) == 1     # depois do 1º lance: uma avaliação
+    assert vistos[2] == []                              # depois do fen: posição nova, histórico zerado
+
+
+@pytest.mark.parametrize("devolvido,esperado", [(None, False), (0, False), (1, True), ("sim", True), ([], False)])
+def test_economia_nao_booleana_e_convertida_em_bool(tmp_path, monkeypatch, devolvido, esperado):
+    chamadas = motor_com_lances(monkeypatch, "e2e4")
+    monkeypatch.setattr(tempo, "modo_economia", lambda historico, material: devolvido)
+    with pytest.raises(EOFError):
+        jogar(tmp_path, chess.WHITE, Teclado())
+    assert chamadas[0]["economia"] is esperado
+
+
+@precisa_stockfish_main
+def test_economia_nunca_deixa_o_alvo_passar_do_maximo_mesmo_abaixo_do_tempo_minimo(monkeypatch):
+    monkeypatch.setattr(tempo, "calcular_tempo", lambda *a: (0.03, 0.03))   # máximo menor que TEMPO_MINIMO_S
+    alvos = []
+    monkeypatch.setattr(tempo, "deve_parar", lambda d, alvo, maximo, *r: alvos.append((alvo, maximo)) or True)
+    motor = partida.abrir_motor(STOCKFISH, 1, 16)
+    try:
+        partida.escolher_lance(chess.Board(), motor, "15+10", {"restante_s": 900, "incremento_s": 10, "atraso_humano_s": 1},
+                               economia=True)
+    finally:
+        motor.quit()
+    alvo, maximo = alvos[0]
+    assert alvo <= maximo == 0.03
+
+
+def test_lance_forcado_ou_de_emergencia_sem_avaliacao_real_nao_entra_como_calmo(tmp_path, monkeypatch):
+    """Achado do revisor-tempo: avaliação 0.0 de enfeite (profundidade 0) não pode virar 0 cp 'calmo'."""
+    vistos = []
+    monkeypatch.setattr(tempo, "modo_economia", lambda historico, material: vistos.append(list(historico)) or False)
+    perfis = iter([(0.0, 0), (0.0, 1), (0.4, 18)])   # (avaliação, profundidade): forçado, emergência depth 1, normal
+
+    def falso(board, motor, perfil, relogio, *a, **k):
+        lance = list(board.legal_moves)[0]
+        info = info_falsa(lance)
+        info["avaliacao"], info["profundidade"] = next(perfis)
+        return lance, info
+    monkeypatch.setattr(partida, "escolher_lance", falso)
+    with pytest.raises(EOFError):
+        jogar(tmp_path, chess.WHITE, Teclado("a7a6", "b7b6", "c7c6"))
+    assert vistos[1] == [None]            # profundidade 0: sem avaliação real
+    assert vistos[2] == [None, 0]         # depth 1 tem avaliação real (0,0): conta
+    assert vistos[3] == [None, 0, 40]

@@ -235,6 +235,10 @@ def _avaliacao_para_log(score):
     return score.score() / 100
 
 
+def _numero_finito(valor):
+    return isinstance(valor, (int, float)) and not isinstance(valor, bool) and math.isfinite(valor)
+
+
 def _numero_positivo(valor):
     return (isinstance(valor, (int, float)) and not isinstance(valor, bool)
             and math.isfinite(valor) and valor > 0)
@@ -277,7 +281,7 @@ def _alvo_e_maximo(board, relogio, tempo_provisorio_s):
 
 
 def escolher_lance(board, motor, perfil, relogio, caminho_book=None, tempo_provisorio_s=None,
-                   folga_watchdog_s=None):
+                   folga_watchdog_s=None, economia=False):
     """book -> tempo -> Stockfish (analysis, parada em tempo real) -> devolve (lance, info).
 
     `relogio` é um dicionário: {"restante_s": ..., "incremento_s": ..., "atraso_humano_s": ...}.
@@ -299,6 +303,10 @@ def escolher_lance(board, motor, perfil, relogio, caminho_book=None, tempo_provi
     6. Watchdog (opcional): se `folga_watchdog_s` for informado e o motor passar de
        máximo + folga sem responder, fechamos o processo à força em vez de esperar para
        sempre. A folga é decisão do grupo (não tem valor padrão: regra 4).
+
+    `economia=True` (quem chama decide com tempo.modo_economia, do Marcos) corta o ALVO por
+    tempo.FATOR_ECONOMIA, nunca abaixo de tempo.TEMPO_MINIMO_S e nunca acima do máximo. O
+    máximo, o limite duro do motor, não muda.
 
     Enquanto tempo.py for esqueleto, é preciso informar `tempo_provisorio_s` (só para
     testar). Não existe valor padrão de propósito: não inventamos tempo (regra 4).
@@ -343,6 +351,8 @@ def escolher_lance(board, motor, perfil, relogio, caminho_book=None, tempo_provi
         limite_motor = chess.engine.Limit(depth=1)  # emergência: o mais rápido possível
     else:
         alvo_s, maximo_s = limites
+        if economia:
+            alvo_s = min(max(alvo_s * tempo.FATOR_ECONOMIA, tempo.TEMPO_MINIMO_S), maximo_s)
         limite_motor = chess.engine.Limit(time=maximo_s)
 
     # 4 e 5) Stockfish pensa
@@ -593,6 +603,16 @@ def jogar_partida(minha_cor, chave_perfil, relogio, motor, entrada=input, saida=
     esperando_go = False
     inicio_da_vez = agora()   # quando o nosso relógio passou a correr nesta vez
     nossos_lances = 0
+    historico_aval = []       # (posição do lance na partida, avaliação em centésimos de peão); None = não conta como calma
+
+    def podar_historico():
+        """Esquece avaliações de lances que não existem mais (depois de `desfazer` ou `fen`).
+
+        Cada avaliação guarda em que lance da partida foi feita. Se a pilha de lances do
+        tabuleiro ficou menor que isso, o lance foi desfeito (ou a posição foi recarregada
+        pelo `fen`): a avaliação sai, para o modo_economia não decidir com dados falsos.
+        """
+        historico_aval[:] = [(indice, valor) for indice, valor in historico_aval if indice < len(board.move_stack)]
 
     def ao_sincronizar(segundos):
         """Aplica o `t mm:ss`. Pede confirmação se passar do máximo possível (provável erro)."""
@@ -610,6 +630,7 @@ def jogar_partida(minha_cor, chave_perfil, relogio, motor, entrada=input, saida=
         while True:
             while board.outcome() is None:
                 try:
+                    podar_historico()
                     if board.turn == minha_cor:
                         # --- nossa vez ---
                         pensar = True
@@ -633,10 +654,16 @@ def jogar_partida(minha_cor, chave_perfil, relogio, motor, entrada=input, saida=
                                 # o tempo que já passou nesta vez (inclusive de tentativas anteriores) já foi gasto
                                 relogio_vez = dict(relogio)
                                 relogio_vez["restante_s"] = max(0.0, relogio["restante_s"] - (agora() - inicio_da_vez))
-                                saida(f"Pensando... (relógio estimado {_mmss(relogio_vez['restante_s'])})")
+                                try:
+                                    economia = bool(tempo.modo_economia([v for _, v in historico_aval],
+                                                                         tempo.material_em_centipawns(board)))
+                                except Exception:   # bug no código de tempo: sem economia, a partida segue
+                                    economia = False
+                                saida(f"Pensando... (relógio estimado {_mmss(relogio_vez['restante_s'])})"
+                                      + (" [modo economia]" if economia else ""))
                                 try:
                                     lance, info = escolher_lance(board, motor, chave_perfil, relogio_vez, caminho_book,
-                                                                 tempo_provisorio_s, folga_watchdog_s)
+                                                                 tempo_provisorio_s, folga_watchdog_s, economia)
                                 except Exception as erro:
                                     saida(f"Erro ao escolher o lance ({type(erro).__name__}: {erro}).")
                                     motor = _reiniciar_motor(motor, reabrir_motor, saida)
@@ -663,6 +690,9 @@ def jogar_partida(minha_cor, chave_perfil, relogio, motor, entrada=input, saida=
                                                     info["nos"], info["avaliacao"], info["pv"], info["tempo_s"],
                                                     book=info["book"])
                                 board.push(lance)
+                                aval = info["avaliacao"]
+                                historico_aval.append((len(board.move_stack) - 1,
+                                                       round(aval * 100) if (_numero_finito(aval) and not info["book"] and info["profundidade"] > 0) else None))
                                 # gasto real desta vez (nunca menos do que o motor declarou) + atraso humano - incremento
                                 gasto = max(info["tempo_s"], agora() - inicio_da_vez)
                                 relogio["restante_s"] = max(0.0, relogio["restante_s"] - gasto
