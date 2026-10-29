@@ -2,33 +2,123 @@
 
 Equipe: Marcos Paulo, Junio, Léo.
 
+Programa de linha de comando para jogar o torneio: o **Stockfish** calcula os lances e o nosso
+código cuida do resto (relógio, book, tablebases, log, comandos de emergência) e, principalmente,
+da **gestão de tempo própria** (`tempo.py`), que é a nossa modificação significativa.
+
 ## Projeto-base declarado
 - Motor: Stockfish 19 (local, via UCI). Release `sf_19` (05/09/2026), arquivo
   `stockfish-linux-x86-64-universal.tar.gz` do GitHub oficial (official-stockfish/Stockfish).
   SHA-256: `9defc0d4e55d49c65a6d042f3e571a39fcea499ade6dbe741b53b8c65e03611f`.
   Fica em `stockfish/`, fora do Git. O código-fonte vem junto no mesmo arquivo (pasta `src/`).
 - Licença: GPLv3 (ver LICENSE). Código-fonte publicado neste repositório.
+- Biblioteca: python-chess 1.11.2 (regras do jogo, leitura de book e tablebases). Não escolhe lances.
 
-## O que é autoria nossa
-- tempo.py: gestão de tempo escrita do zero (Marcos Paulo): alvo e máximo por lance,
-  desconto do atraso humano, parada em tempo real, modo economia, perfis de relógio.
-- partida.py e log.py: laço da partida, validação, comandos de emergência, ponderação, log (Junio).
-- book.py e testes/: integração do book e simulador de partidas (Léo).
+## Quem é responsável por quê (cada um defende o seu na arguição)
+| Módulo | Responsável | O que faz |
+|---|---|---|
+| `tempo.py` | Marcos Paulo | **Modificação significativa.** Gestão de tempo escrita do zero: alvo e máximo por lance, desconto do atraso humano, parada em tempo real, atalho de tempo zero, modo economia, sincronização do relógio (`t mm:ss`), perfis de relógio. |
+| `partida.py`, `log.py` | Junio | Laço da partida, leitura e validação dos lances em UCI, comandos de emergência, relógio interno, motor com reinício automático e vigia (watchdog), log e PGN. |
+| `book.py`, `ferramentas/`, `testes/torneio.py` | Léo | Book de aberturas, gerador do book, download das tablebases, simulador de partidas. |
 
-## O que NÃO é autoria nossa
-- Stockfish (motor de busca e avaliação).
-- Opening book Polyglot: origem PREENCHER (Léo).
-- Tablebases Syzygy 3-5 peças: origem PREENCHER (Léo). Entregues em mídia física, fora do Git.
+Parte do código de `partida.py`, `log.py`, `book.py`, das ferramentas e dos testes foi desenvolvida com
+apoio do Claude Code (assistente de IA), sob revisão do responsável de cada módulo.
 
-## Como instalar e rodar
-1. Python 3, ambiente virtual e `pip install -r requirements.txt`.
-2. Baixar o Stockfish compatível com o processador e apontar o caminho em partida.py.
-3. Colocar book (.bin) e tablebases (até 5 peças) nas pastas indicadas.
-4. Rodar: `python partida.py`.
+## O que NÃO é autoria nossa (terceiros)
+- **Stockfish 19**: motor de busca e avaliação (GPLv3).
+- **python-chess 1.11.2**: regras, leitura de book e tablebases (GPLv3).
+- **Opening book** `book/book.bin`: **gerado por nós** com `ferramentas/gerar_book.py` a partir das
+  aberturas do repositório [lichess-org/chess-openings](https://github.com/lichess-org/chess-openings)
+  (licença **CC0**, domínio público; estado do `master` em 29/10/2026, commit `712a58be746c`).
+  Os arquivos `a.tsv` ... `e.tsv` e o texto da licença estão em `ferramentas/dados/chess-openings/`.
+  Como funciona: cada abertura é percorrida até o meio-lance 10 e cada lance recebe um peso igual a
+  quantas aberturas o usam. O book é reproduzível (um teste confere que o arquivo do Git é idêntico
+  ao que o gerador produz hoje).
+- **Tablebases Syzygy de 3, 4 e 5 peças** (nunca 6 ou 7): tabelas de Ronde Veldhuizen, baixadas do
+  servidor da Lichess (`tablebase.lichess.ovh/tables/standard/3-4-5-wdl` e `3-4-5-dtz`, ~1 GB) com
+  `ferramentas/baixar_tablebases.py`. A integridade é conferida por MD5 contra a lista oficial do
+  espelho do Sesse (`tablebase.sesse.net/syzygy/3-4-5/checksum.md5`), fixada no Git em
+  `ferramentas/dados/tablebases-3-4-5.md5`. Ficam em `tablebases/`, **fora do Git** (entregues em
+  mídia física).
+
+## Como instalar (com internet, uma vez, antes do torneio)
+1. Python 3.11 ou mais novo, ambiente virtual e dependências:
+   ```
+   python -m venv .venv
+   source .venv/bin/activate        # Windows: .venv\Scripts\activate
+   pip install -r requirements.txt
+   ```
+2. **Stockfish**: baixe o build certo para o sistema na página de releases oficial
+   (github.com/official-stockfish/Stockfish/releases) e coloque o executável em `stockfish/`.
+   O programa o encontra sozinho (primeiro arquivo `stockfish-*` executável). Para Linux, o build
+   `x86-64-universal` usado aqui funciona em qualquer processador x86-64. No Windows, use o `.exe` do
+   mesmo release.
+3. **Book**: já está no Git (`book/book.bin`). Para regerar: `python ferramentas/gerar_book.py`.
+4. **Tablebases** (3 a 5 peças): `python ferramentas/baixar_tablebases.py` (~1 GB). Rodar de novo só
+   baixa o que faltar. Para só conferir: `--so-conferir`.
+
+Depois disso, **o programa não usa internet**: roda inteiro no notebook, com Wi-Fi e dados desligados.
+
+## Como rodar uma partida
+```
+python partida.py
+```
+O programa pergunta a **cor** (brancas/pretas), o **perfil de relógio** (`15+10`, `25+0` ou
+`armageddon`; no armageddon as brancas têm 5 min, as pretas 4 min e o empate classifica as pretas) e o
+**atraso humano** por lance (segundos que a equipe gasta anunciando, movendo a peça e apertando o
+relógio; sai da medição na mesa). Depois joga: na nossa vez mostra, em destaque, `>>> JOGUE: e2e4`;
+na vez do adversário o operador digita o lance dele em **UCI** (`e2e4`, roque `e1g1`, promoção `e7e8q`).
+
+### Comandos de emergência (digitados no lugar de um lance)
+| Comando | O que faz |
+|---|---|
+| `desfazer` | Desfaz o último meio-lance (corrige lance digitado errado). Na nossa vez o motor **não** pensa sozinho depois disso: espere acertar a posição e digite `go`. |
+| `go` | Libera o motor para pensar (depois de `desfazer` ou `fen` na nossa vez). |
+| `tab` | Mostra o tabuleiro do programa, o FEN e de quem é a vez (para conferir com o tabuleiro físico, que é a fonte da verdade). |
+| `fen <posição>` | Recarrega a posição a partir de um FEN (inclua o número do lance real no último campo). Depois disso o book fica desligado. |
+| `t mm:ss` | Acerta o relógio interno com o relógio físico (ex.: `t 12:34`). Se o valor for maior que o possível no perfil, pede confirmação. |
+
+### Se algo der errado
+- Motor travou ou caiu: o programa o reinicia sozinho. Se não voltar, passa para o **modo manual**
+  (o operador digita também o nosso lance).
+- Ctrl+C não fecha a partida. Teclado fechado: salva log e PGN e sai.
+- Fim de partida por engano de digitação (ex.: mate que não existe): no aviso final digite `desfazer`.
+
+### Variáveis de ambiente (opcionais)
+- `CAPABLANCA_ATRASO_HUMANO_S`: atraso humano, para não precisar digitar toda vez.
+- `CAPABLANCA_FOLGA_WATCHDOG_S`: folga do vigia do motor (ver abaixo). Sem ela o vigia fica desligado e o
+  programa avisa na largada.
+- `CAPABLANCA_TEMPO_PROVISORIO_S`: **só para testes**, usado quando o `tempo.py` não existe. Não vale no torneio.
+
+### Onde ficam os arquivos de cada partida
+Pasta `partidas/` (fora do Git): `AAAA-MM-DD_HH-MM-SS.txt` (log, uma linha por lance nosso com os 8 campos:
+número, cor, lance UCI, profundidade, nós, avaliação, PV, tempo gasto; lance de book entra com profundidade 0 e
+a palavra `book`) e `.pgn` (a partida inteira, salvo a cada lance).
+
+## Regras do torneio e onde o código as garante
+| Regra | Onde |
+|---|---|
+| Tudo local, sem rede nem API durante as partidas | `partida.py`, `book.py` (só leem arquivos). Internet só nas ferramentas de preparação. |
+| Book só até o meio-lance 10 | `book.py` (duas travas: `ply < 10` e partida iniciada da posição inicial) e `partida.py` |
+| Tablebases só até 5 peças | `SyzygyProbeLimit=5` enviado ao motor em `partida.py`; `baixar_tablebases.py` recusa 6+ peças |
+| Lances sempre em UCI | `partida.py` |
+| Log com 8 campos e `flush` a cada lance | `log.py` |
+| Travou ou estourou o tempo = derrota | limite duro `Limit(time=...)` no motor, vigia, reinício e modo manual |
+| Dependências com versão fixa | `requirements.txt` |
 
 ## Testes
-- `pytest` (testes unitários de tempo.py)
-- `python testes/torneio.py` (partidas automáticas entre versões, relógio simulado)
+```
+pytest -q                                   # todos os testes
+python testes/torneio.py confronto --help   # simulador de partidas
+python testes/torneio.py estouro            # mede o estouro do motor (dado para a folga do vigia)
+```
+O simulador joga partidas automáticas com **relógio simulado e atraso artificial**, com três versões do mesmo
+Stockfish: `nossa` (o programa de verdade, com `tempo.py`), `fixa` (tempo fixo por lance) e `padrao` (a gestão
+de tempo do próprio Stockfish). Alterna as cores e usa aberturas variadas. Mede vitórias, empates, derrotas,
+**derrotas por tempo** e o tempo que sobrou. O `--atraso-s` é obrigatório: não existe valor padrão.
 
 ## Resultados dos testes (para a arguição)
-PREENCHER com a tabela: nossa gestão x tempo fixo por lance x gestão padrão do Stockfish.
+<!--RESULTADOS-->
+
+## Prazos
+Congelar o código: 02/11. Envio do Git para icev@somosicev.com: 04/11/2026. Ensaio geral: 05/11. Torneio: 06/11.
