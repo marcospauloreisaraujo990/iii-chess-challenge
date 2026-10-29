@@ -1,22 +1,17 @@
-# Ambiente virtual e cache do Python
 .venv/
-venv/
 __pycache__/
 *.pyc
+.pytest_cache/
+partidas/
+*.log
+tablebases/
+stockfish/
+.claude/settings.local.json
+log_emergencia.txt
+venv/
 
 # Pacotes baixados para instalar sem internet (levar no pendrive, não no Git)
 wheels/
-
-# Logs das partidas e resultados de testes
-logs/*
-!logs/LEIA.txt
-tests/resultados/
-
-# Arquivos grandes de terceiros (entregar compactados, com declaração de origem)
-assets/syzygy/*
-!assets/syzygy/LEIA.txt
-assets/stockfish/*
-!assets/stockfish/LEIA.txt
 
 # Sistema operacional
 .DS_Store
