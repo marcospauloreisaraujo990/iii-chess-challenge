@@ -10,6 +10,7 @@ import time
 import chess
 import pytest
 
+import tempo
 from ferramentas import assistir
 from testes import torneio
 
@@ -455,6 +456,35 @@ def test_sem_limite_o_relogio_que_vai_para_o_tempo_py_nao_anda(servidor):
         _esperar(porta, lambda e: e["pensando"] == "pretas")
     assert len(vistos) >= 3 and len(set(vistos)) == 1   # o mesmo relógio em todos os lances
     assert vistos[0] == float(assistir.RELOGIOS_JOGAR[assistir.RELOGIO_ILIMITADO][0])
+
+
+def test_modo_jogar_passa_o_modo_economia_como_o_terminal(servidor, monkeypatch):
+    """A tela tem que ser réplica do partida.py: o modo economia do tempo.py também vale aqui.
+
+    Antes desta correção o modo jogar nunca passava `economia`, então essa parte do tempo.py
+    (a modificação significativa) ficava desligada justamente na tela usada para demonstrar.
+    """
+    economias, historicos = [], []
+
+    def modo_economia_falso(historico, material):
+        historicos.append(list(historico))
+        return True                      # força o economia para provar que ele chega ao escolher
+
+    def escolher(board, motor, perfil, relogio, caminho_book=None, economia=False, ao_pensar=None, **k):
+        economias.append(economia)
+        lance = next(iter(board.legal_moves))
+        return lance, {"book": False, "profundidade": 15, "nos": 1, "avaliacao": 0.75, "pv": [lance],
+                       "tempo_s": 0.0, "motor_caiu": False}
+
+    monkeypatch.setattr(tempo, "modo_economia", modo_economia_falso)
+    porta = servidor(assistir.Visualizador(abrir_bot=MotorFalso, escolher=escolher, ponder=PonderFalso))
+    _pedir(porta, "POST", "/nova", {"modo": "jogar", "lado": "brancas", "relogio": "15+10"})
+    _esperar(porta, lambda e: e["pensando"] == "pretas")
+    _pedir(porta, "POST", "/lance", {"uci": "e7e5"})
+    _esperar(porta, lambda e: len(e["lances"]) >= 3)
+    assert economias[:2] == [True, True]          # o tempo.py foi consultado e a resposta foi usada
+    # e ele recebe o histórico de avaliações crescendo, como no partida.py (0.75 peões -> 75 cp)
+    assert historicos[0] == [] and historicos[1] == [75]
 
 
 def test_jogar_parametros_invalidos(servidor):

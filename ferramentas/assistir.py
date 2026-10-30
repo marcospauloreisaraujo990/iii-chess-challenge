@@ -35,6 +35,7 @@ if RAIZ not in sys.path:
 import chess
 
 import partida
+import tempo
 from testes import torneio
 
 PAGINA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assistir.html")
@@ -426,6 +427,7 @@ class Visualizador:
         caminho_book = partida.CAMINHO_BOOK if os.path.isfile(partida.CAMINHO_BOOK) else None
         motor = None
         resultado = motivo = None
+        historico_aval = []   # avaliações dos lances do bot, para o modo economia do tempo.py
 
         def mostrar(**extra):
             if ativa():
@@ -452,10 +454,20 @@ class Visualizador:
                 if cor == bot:
                     mostrar(pensando=nome[cor], pensando_desde=time.time(), legais=[])
                     observador.tabuleiro_pensando = board.copy(stack=False)
+                    # o mesmo cálculo do partida.py e do simulador: a tela tem que ser réplica da mesa
+                    try:
+                        economia = bool(tempo.modo_economia(historico_aval,
+                                                            tempo.material_em_centipawns(board)))
+                    except Exception:   # bug no código de tempo não pode derrubar a partida
+                        economia = False
                     lance, info = self.escolher(
                         board, motor, "visualizador",
                         {"restante_s": restante[cor], "incremento_s": incremento, "atraso_humano_s": atraso},
-                        caminho_book=caminho_book, ao_pensar=observador.ao_pensar)
+                        caminho_book=caminho_book, economia=economia, ao_pensar=observador.ao_pensar)
+                    aval_bot = info.get("avaliacao")
+                    historico_aval.append(round(aval_bot * 100)
+                                          if partida._numero_finito(aval_bot) and info.get("profundidade", 0) > 0
+                                          else None)
                     if cancelar.is_set():
                         resultado, motivo = "*", "interrompida"
                         break
