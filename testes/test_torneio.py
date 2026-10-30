@@ -5,6 +5,7 @@ tabela com precisão. Dois testes no fim usam o Stockfish de verdade, se ele est
 """
 import glob
 import os
+import types
 
 import chess
 import pytest
@@ -362,6 +363,7 @@ def test_cancelar_interrompe_entre_lances():
 
 def test_fraco_e_uma_versao_valida():
     assert "fraco" in torneio.VERSOES
+    assert "lichess8" in torneio.VERSOES
     t = torneio.montar_tarefas("nossa", "fraco", 2, "15+10", 6.0, 0.2, None, {}, 1, 300)
     assert {x["pretas"] for x in t} | {x["brancas"] for x in t} == {"nossa", "fraco"}
 
@@ -377,3 +379,21 @@ def test_bot_fraco_real_joga_lance_legal():
         assert jogador.escolher(chess.Board(), relogio) in chess.Board().legal_moves
     finally:
         motor.quit()
+
+
+def test_lichess8_usa_profundidade_e_tempo_fixos_e_ignora_o_relogio():
+    """A algema do nível 8 não depende do relógio da simulação: é sempre prof. 22 e ~1 s."""
+    pedidos = []
+
+    class MotorEspiao:
+        def play(self, board, limite):
+            pedidos.append(limite)
+            return types.SimpleNamespace(move=next(iter(board.legal_moves)))
+
+    jogador = torneio.JogadorLichess8(MotorEspiao())
+    for restante in (600.0, 3.0):            # relógio cheio e relógio quase zerado
+        relogio = torneio.RelogioSim(restante, 10, 0)
+        relogio.adversario = torneio.RelogioSim(restante, 10, 0)
+        assert jogador.escolher(chess.Board(), relogio) in chess.Board().legal_moves
+    assert [(l.depth, l.time) for l in pedidos] == [(22, 1.0), (22, 1.0)]
+    assert all(l.white_clock is None and l.black_clock is None for l in pedidos)

@@ -186,10 +186,35 @@ python testes/torneio.py confronto --help   # simulador de partidas
 python testes/torneio.py estouro            # mede o estouro do motor (dado para a folga do vigia)
 python ferramentas/verificar_maquina.py     # confere o PC e mede as threads
 ```
-O simulador joga partidas automáticas com **relógio simulado e atraso artificial**, com três versões do mesmo
-Stockfish: `nossa` (o programa de verdade, com `tempo.py`), `fixa` (tempo fixo por lance) e `padrao` (a gestão
-de tempo do próprio Stockfish). Alterna as cores e usa aberturas variadas. Mede vitórias, empates, derrotas,
-**derrotas por tempo** e o tempo que sobrou. O `--atraso-s` é obrigatório: não existe valor padrão.
+O simulador joga partidas automáticas com **relógio simulado e atraso artificial**, com cinco versões do mesmo
+Stockfish: `nossa` (o programa de verdade, com `tempo.py`), `fixa` (tempo fixo por lance), `padrao` (a gestão
+de tempo do próprio Stockfish), `fraco` (Skill Level 3, simula um bot de aluno) e `lichess8` (ver abaixo).
+Alterna as cores e usa aberturas variadas. Mede vitórias, empates, derrotas, **derrotas por tempo** e o tempo
+que sobrou. O `--atraso-s` é obrigatório: não existe valor padrão.
+
+### Régua externa: o "nível 8" do Lichess
+A versão `lichess8` emula o mais forte dos 8 níveis do *jogar contra o computador* do Lichess: avaliação em
+força máxima (Skill Level 20, que é o padrão) com a **busca algemada em profundidade 22 e ~1 s por lance**.
+Esses são os valores que o Lichess passa ao Stockfish no **fishnet**, o programa que joga esses níveis
+([discussão com o rastreamento do código](https://talkchess.com/viewtopic.php?p=899498),
+[fórum do Lichess](https://lichess.org/forum/general-chess-discussion/what-rating-is-the-practice-with-computer)).
+
+Serve para responder, com placar, "o nosso bot é forte?" usando um adversário que qualquer um conhece e pode
+conferir, em vez de comparar o nosso código com ele mesmo. **O nosso bot não é limitado assim**: roda Skill
+Level 20 sem teto de profundidade, com ~10 s por lance, 15 threads, book e tablebases — ou seja, o nível 8 é a
+nossa régua, não a nossa meta.
+
+```
+python testes/torneio.py confronto --a nossa --b lichess8 --perfil 15+10 \
+    --partidas 8 --atraso-s 12 --escala 0.2 --paralelo 4
+```
+Os limites do `lichess8` são absolutos e **não entram na escala**: com `--escala` baixa o nosso lado pensa
+menos e o adversário continua inteiro, então o teste fica mais difícil para nós, nunca mais fácil.
+
+Duas ressalvas, para a comparação ser defendida com honestidade: a emulação copia a **algema** (Skill Level,
+profundidade e tempo), não o servidor do Lichess, que tem hardware diferente; e no simulador os dois motores
+recebem as tablebases, enquanto o Lichess não as usa nesses níveis. As duas ressalvas pesam **contra** nós
+(o adversário emulado fica um pouco mais forte que o original), então o placar é um piso, não um teto.
 
 ## Resultados dos testes (para a arguição)
 <!--RESULTADOS-->

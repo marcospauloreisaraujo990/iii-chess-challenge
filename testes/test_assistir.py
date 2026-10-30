@@ -134,7 +134,7 @@ def test_pagina_estado_e_opcoes(servidor):
     assert status == 200 and estado["rodando"] is False and estado["fen"] == chess.STARTING_FEN
     status, dados = _pedir(porta, "GET", "/opcoes")
     opcoes = json.loads(dados)
-    assert set(opcoes["oponentes"]) == {"padrao", "fraco", "fixa"} and opcoes["atraso_s"] == 12.0
+    assert set(opcoes["oponentes"]) == {"padrao", "lichess8", "fraco", "fixa"} and opcoes["atraso_s"] == 12.0
     assert _pedir(porta, "GET", "/nada")[0] == 404
 
 

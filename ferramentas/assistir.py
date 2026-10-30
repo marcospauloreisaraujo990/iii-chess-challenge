@@ -43,6 +43,7 @@ HASH_POR_MOTOR_MB = 256
 
 OPONENTES = {
     "padrao": "Stockfish (gestão de tempo dele)",
+    "lichess8": f"Lichess nível 8 (prof. {torneio.LICHESS8_PROFUNDIDADE}, {torneio.LICHESS8_TEMPO_S:g} s)",
     "fraco": f"Bot fraco (Stockfish nível {torneio.NIVEL_FRACO})",
     "fixa": "Stockfish com tempo fixo por lance",
 }

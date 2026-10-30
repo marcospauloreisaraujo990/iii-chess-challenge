@@ -60,10 +60,19 @@ import partida
 import tempo
 from ferramentas import gerar_book
 
-VERSOES = ("nossa", "fixa", "padrao", "fraco")
+VERSOES = ("nossa", "fixa", "padrao", "fraco", "lichess8")
 # Força do bot "fraco": Skill Level do Stockfish (0 a 20). 3 joga como um bot simples, do nível de um
 # motor feito em sala de aula, para ver como nos saímos contra adversários mais fracos.
 NIVEL_FRACO = 3
+
+# Emulação do "nível 8" do Lichess, o mais forte dos 8 níveis de jogar contra o computador.
+# Não é o Stockfish solto: é a avaliação em força máxima (Skill Level 20, que é o padrão) com a
+# BUSCA ALGEMADA em profundidade 22 e cerca de 1 s por lance. É o que o Lichess usa no fishnet,
+# o programa que joga os níveis 1 a 8 (ver as fontes no README).
+# Serve de RÉGUA na arguição: é um adversário externo que qualquer um conhece e pode conferir,
+# em vez de uma versão nossa comparada com ela mesma.
+LICHESS8_PROFUNDIDADE = 22
+LICHESS8_TEMPO_S = 1.0
 PASTA_RESULTADOS = os.path.join(RAIZ, "testes", "resultados")
 # Cada motor do simulador usa poucos recursos por padrão, porque várias partidas rodam ao mesmo
 # tempo. Para experimentos de força (ex.: 15 threads contra 1) use --threads e --hash.
@@ -182,6 +191,21 @@ class JogadorFraco(JogadorPadrao):
     def __init__(self, motor, nivel=NIVEL_FRACO):
         super().__init__(motor)
         motor.configure({"Skill Level": nivel})
+
+
+class JogadorLichess8(Jogador):
+    """Emula o nível 8 do Lichess: Skill Level 20 (padrão) com profundidade 22 e ~1 s por lance.
+
+    Os dois limites são ABSOLUTOS: ficam de fora da escala da simulação, porque são a algema do
+    adversário e não o relógio dele. Consequência: numa simulação com --escala baixa o NOSSO bot
+    pensa menos e o teste fica mais difícil para nós, nunca mais fácil. Para a comparação de
+    verdade (10 s nossos contra 1 s dele) rode com --escala 1.
+    """
+    nome = "lichess8"
+
+    def escolher(self, board, relogio):
+        limite = chess.engine.Limit(depth=LICHESS8_PROFUNDIDADE, time=LICHESS8_TEMPO_S)
+        return self.motor.play(board, limite).move
 
 
 # ======================================================================================
@@ -335,6 +359,8 @@ def _criar_jogador(versao, motor, perfil, tempo_fixo_s):
         return JogadorPadrao(motor)
     if versao == "fraco":
         return JogadorFraco(motor)
+    if versao == "lichess8":
+        return JogadorLichess8(motor)
     raise ValueError(f"versão desconhecida: {versao!r}. Opções: {', '.join(VERSOES)}")
 
 
