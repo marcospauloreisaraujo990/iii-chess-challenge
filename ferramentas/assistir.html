@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Capablanca ao vivo</title>
+<style>
+  :root {
+    --fundo: #f4f1ea; --painel: #ffffff; --borda: #e3ded3; --texto: #1f1d1a; --suave: #6f6a60;
+    --casa-clara: #ece3cf; --casa-escura: #9c7b55; --destaque: rgba(214, 170, 40, .55);
+    --selecao: rgba(31, 122, 83, .55); --alvo: rgba(31, 61, 40, .35); --xeque: rgba(210, 40, 30, .75);
+    --nosso: #1f7a53; --perigo: #b3261e; --barra-branca: #f7f5f0; --barra-preta: #26231f;
+    --sombra: 0 1px 2px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --fundo: #14130f; --painel: #1d1b17; --borda: #2f2c26; --texto: #ece7dc; --suave: #a39c8e;
+      --casa-clara: #d9ccb0; --casa-escura: #87653f; --destaque: rgba(232, 190, 60, .55);
+      --selecao: rgba(79, 192, 141, .55); --alvo: rgba(20, 40, 25, .45);
+      --nosso: #4fc08d; --perigo: #ff7b72; --barra-branca: #efebe3; --barra-preta: #0d0c0a;
+      --sombra: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --fundo: #14130f; --painel: #1d1b17; --borda: #2f2c26; --texto: #ece7dc; --suave: #a39c8e;
+    --casa-clara: #d9ccb0; --casa-escura: #87653f; --destaque: rgba(232, 190, 60, .55);
+    --selecao: rgba(79, 192, 141, .55); --alvo: rgba(20, 40, 25, .45);
+    --nosso: #4fc08d; --perigo: #ff7b72; --barra-branca: #efebe3; --barra-preta: #0d0c0a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--fundo); color: var(--texto);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--borda); }
+  header h1 { font-size: 18px; margin: 0; }
+  header .sub { color: var(--suave); font-size: 13px; }
+  .chip { margin-left: auto; font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--borda);
+          color: var(--suave); white-space: nowrap; }
+  .chip.ao-vivo { color: var(--nosso); border-color: var(--nosso); }
+  .chip.ao-vivo::before { content: "●"; margin-right: 6px; animation: pulsar 1.2s infinite; }
+  @keyframes pulsar { 50% { opacity: .25; } }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 20px; padding: 20px;
+         max-width: 1180px; margin: 0 auto; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 16px; } }
+
+  .tabuleiro-area { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 12px; align-content: start; }
+  .relogio-linha { grid-column: 2; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+                   background: var(--painel); border: 1px solid var(--borda); border-radius: 10px;
+                   padding: 8px 14px; box-shadow: var(--sombra); max-width: 640px; }
+  .relogio-linha .nome { font-weight: 600; display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .relogio-linha .nome span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .peao { width: 12px; height: 12px; border-radius: 50%; border: 1px solid var(--suave); flex: none; }
+  .peao.brancas { background: #f7f5f0; } .peao.pretas { background: #1f1d1a; }
+  .tag { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--nosso); color: var(--painel); font-style: normal; }
+  .tempo { font: 600 26px/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-variant-numeric: tabular-nums;
+           padding: 6px 12px; border-radius: 6px; min-width: 104px; text-align: right; }
+  .relogio-linha.ativo .tempo { background: var(--texto); color: var(--painel); }
+  .relogio-linha.critico .tempo { background: var(--perigo); color: #fff; }
+  .barra { grid-row: 2; width: 30px; border-radius: 6px; overflow: hidden; background: var(--barra-preta);
+           position: relative; border: 1px solid var(--borda); }
+  .barra .branca { position: absolute; left: 0; right: 0; background: var(--barra-branca); transition: height .5s ease; }
+  .barra .valor { position: absolute; left: 0; right: 0; font: 600 10px/1 ui-monospace, monospace; text-align: center;
+                  mix-blend-mode: difference; color: #fff; }
+  .moldura { grid-row: 2; grid-column: 2; position: relative; max-width: 640px; }
+  .tabuleiro { display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr);
+               aspect-ratio: 1; width: 100%; border-radius: 8px; overflow: hidden; box-shadow: var(--sombra);
+               user-select: none; }
+  .casa { position: relative; display: flex; align-items: center; justify-content: center; }
+  .casa.clara { background: var(--casa-clara); } .casa.escura { background: var(--casa-escura); }
+  .casa.ultimo::after, .casa.sel::after, .casa.xeque::after { content: ""; position: absolute; inset: 0; }
+  .casa.ultimo::after { background: var(--destaque); }
+  .casa.sel::after { background: var(--selecao); }
+  .casa.xeque::after { background: radial-gradient(circle, var(--xeque) 0%, transparent 72%); }
+  .casa.alvo::before { content: ""; position: absolute; width: 28%; height: 28%; border-radius: 50%;
+                       background: var(--alvo); z-index: 2; }
+  .casa.alvo.ocupada::before { width: 88%; height: 88%; background: none; border: 5px solid var(--alvo); }
+  .tabuleiro.clicavel .casa { cursor: pointer; }
+  .casa .peca { position: relative; z-index: 1; font-size: clamp(22px, 6.2vw, 58px); line-height: 1;
+                font-family: "Segoe UI Symbol", "Noto Sans Symbols2", "DejaVu Sans", "Apple Symbols", serif; }
+  .peca.b { color: #fbfaf7; -webkit-text-stroke: 1.2px #2a261f; text-shadow: 0 1px 1px rgba(0,0,0,.35); }
+  .peca.p { color: #1d1a16; -webkit-text-stroke: .6px #d8cdb4; text-shadow: 0 1px 1px rgba(0,0,0,.25); }
+  .coord { position: absolute; font: 600 10px/1 system-ui, sans-serif; opacity: .75; z-index: 1; }
+  .coord.col { right: 3px; bottom: 2px; } .coord.lin { left: 3px; top: 2px; }
+  .casa.clara .coord { color: var(--casa-escura); } .casa.escura .coord { color: var(--casa-clara); }
+  .promocao { position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+              background: rgba(0,0,0,.45); border-radius: 8px; z-index: 5; }
+  .promocao.mostrar { display: flex; }
+  .promocao .caixa { background: var(--painel); border-radius: 12px; padding: 14px; display: flex; gap: 8px;
+                     box-shadow: var(--sombra); }
+  .promocao button { font-size: 44px; line-height: 1; width: 72px; height: 72px; padding: 0;
+                     font-family: "Segoe UI Symbol", "Noto Sans Symbols2", "DejaVu Sans", serif; }
+
+  .lado { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .cartao { background: var(--painel); border: 1px solid var(--borda); border-radius: 12px; padding: 14px 16px;
+            box-shadow: var(--sombra); }
+  .cartao h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--suave);
+               margin: 0 0 10px; font-weight: 600; }
+  .abas { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; background: var(--fundo); padding: 4px;
+          border-radius: 10px; margin-bottom: 12px; }
+  .abas button { border: 0; background: none; padding: 8px; border-radius: 8px; color: var(--suave); }
+  .abas button.ativa { background: var(--painel); color: var(--texto); box-shadow: var(--sombra); }
+  .controles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .controles label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--suave); }
+  .controles label.largo { grid-column: 1 / -1; }
+  select, button { font: inherit; color: var(--texto); background: var(--fundo); border: 1px solid var(--borda);
+                   border-radius: 8px; padding: 8px 10px; }
+  button { cursor: pointer; font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  button.principal { background: var(--nosso); border-color: var(--nosso); color: var(--painel); }
+  .botoes { grid-column: 1 / -1; display: flex; gap: 8px; } .botoes button { flex: 1; }
+  .escondido { display: none !important; }
+  .numeros { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .numero { background: var(--fundo); border-radius: 8px; padding: 8px; }
+  .numero b { display: block; font: 600 18px/1.2 ui-monospace, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+  .numero small { color: var(--suave); font-size: 11px; }
+  .pv { margin-top: 10px; font: 13px/1.6 ui-monospace, Menlo, Consolas, monospace; background: var(--fundo);
+        border-radius: 8px; padding: 8px 10px; min-height: 42px; word-break: break-word; }
+  .pv .primeiro { color: var(--nosso); font-weight: 700; }
+  .status-pensando { font-size: 13px; color: var(--suave); margin-bottom: 8px; min-height: 19px; }
+  .lances { max-height: 220px; overflow: auto; font: 13px/1.7 ui-monospace, Menlo, Consolas, monospace;
+            display: grid; grid-template-columns: 34px 1fr 1fr; column-gap: 6px; }
+  .lances .n { color: var(--suave); } .lances .ab { color: var(--suave); font-style: italic; }
+  .lances .ult { background: var(--destaque); border-radius: 4px; padding: 0 4px; }
+  svg.grafico { width: 100%; height: 120px; display: block; color: var(--suave); }
+  .resultado { display: none; border-radius: 10px; padding: 12px 14px; font-weight: 700; text-align: center; }
+  .resultado.mostrar { display: block; }
+  .resultado.vitoria { background: color-mix(in srgb, var(--nosso) 18%, transparent); color: var(--nosso); }
+  .resultado.derrota { background: color-mix(in srgb, var(--perigo) 18%, transparent); color: var(--perigo); }
+  .resultado.empate { background: var(--fundo); }
+  .resultado small { display: block; font-weight: 500; color: var(--suave); margin-top: 2px; }
+  .aviso { font-size: 12px; color: var(--suave); }
+  .erro { color: var(--perigo); font-size: 13px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Capablanca ao vivo</h1>
+    <div class="sub">Jogue contra o nosso bot ou assista ele contra outro bot, com relógio de verdade.</div>
+  </div>
+  <div id="chip" class="chip">parado</div>
+</header>
+
+<main>
+  <section class="tabuleiro-area" aria-label="Partida">
+    <div id="relogio-cima" class="relogio-linha"><div class="nome"><i class="peao"></i><span>–</span></div><div class="tempo">–:––</div></div>
+    <div class="barra" aria-label="Avaliação"><div id="barra-branca" class="branca" style="height:50%;bottom:0"></div>
+      <div id="barra-valor" class="valor" style="top:50%">0.0</div></div>
+    <div class="moldura">
+      <div id="tabuleiro" class="tabuleiro" role="grid" aria-label="Tabuleiro"></div>
+      <div id="promocao" class="promocao" role="dialog" aria-label="Escolha a peça da promoção">
+        <div class="caixa" id="promocao-caixa"></div>
+      </div>
+    </div>
+    <div id="relogio-baixo" class="relogio-linha"><div class="nome"><i class="peao"></i><span>–</span></div><div class="tempo">–:––</div></div>
+  </section>
+
+  <aside class="lado">
+    <div id="resultado" class="resultado" role="status"></div>
+
+    <div class="cartao">
+      <div class="abas" role="tablist">
+        <button id="aba-jogar" class="ativa" role="tab">Jogar contra o bot</button>
+        <button id="aba-assistir" role="tab">Bot contra bot</button>
+      </div>
+      <div id="form-jogar" class="controles">
+        <label>Relógio <select id="j-relogio"></select></label>
+        <label>Nosso bot joga de <select id="j-lado"><option value="pretas">pretas (você é brancas)</option><option value="brancas">brancas (você é pretas)</option></select></label>
+        <label class="largo">Atraso humano do bot <select id="j-atraso"></select></label>
+        <div class="botoes"><button id="j-nova" class="principal">Nova partida</button><button id="j-desistir">Desistir</button></div>
+        <p class="aviso" style="grid-column:1/-1;margin:2px 0 0">Clique numa peça e depois na casa. Do seu lado pode jogar você
+          <b>ou o bot de outra máquina</b>: ele fala o lance e você mexe aqui.</p>
+      </div>
+      <div id="form-assistir" class="controles escondido">
+        <label class="largo">Adversário <select id="a-oponente"></select></label>
+        <label class="largo">Relógio <select id="a-controle"></select></label>
+        <label>Nosso bot joga de <select id="a-lado"><option value="brancas">brancas</option><option value="pretas">pretas</option></select></label>
+        <label>Atraso humano <span class="numero" style="padding:8px 10px"><b id="a-atraso" style="font-size:15px">–</b></span></label>
+        <div class="botoes"><button id="a-nova" class="principal">Nova partida</button><button id="a-parar">Parar</button></div>
+      </div>
+      <div id="erro" class="erro" role="alert"></div>
+    </div>
+
+    <div class="cartao">
+      <h2>O que o nosso bot está pensando</h2>
+      <div id="status-pensando" class="status-pensando">Comece uma partida.</div>
+      <div class="numeros">
+        <div class="numero"><b id="n-prof">–</b><small>profundidade</small></div>
+        <div class="numero"><b id="n-aval">–</b><small>avaliação</small></div>
+        <div class="numero"><b id="n-nos">–</b><small>posições</small></div>
+        <div class="numero"><b id="n-nps">–</b><small>por segundo</small></div>
+      </div>
+      <div id="pv" class="pv" aria-label="Linha principal">—</div>
+    </div>
+
+    <div class="cartao">
+      <h2>Avaliação ao longo da partida <span class="aviso">(+ = brancas melhor)</span></h2>
+      <svg id="grafico" class="grafico" viewBox="0 0 300 120" preserveAspectRatio="none" role="img" aria-label="Gráfico da avaliação"></svg>
+    </div>
+
+    <div class="cartao">
+      <h2>Lances</h2>
+      <div id="lances" class="lances"></div>
+    </div>
+    <p class="aviso">Ferramenta de teste e treino. Nas partidas oficiais o programa da mesa é o
+      <code>partida.py</code>, no terminal. Tudo roda neste computador, sem internet.</p>
+  </aside>
+</main>
+
+<script>
+"use strict";
+const PECAS = { k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" };
+const MOTIVOS = {
+  checkmate: "xeque-mate", tempo: "tempo esgotado", "tempo-sem-material": "tempo esgotado, mas sem material para mate",
+  stalemate: "afogamento", insufficient_material: "material insuficiente", threefold_repetition: "repetição tripla",
+  fivefold_repetition: "repetição quíntupla", fifty_moves: "regra dos 50 lances", seventyfive_moves: "regra dos 75 lances",
+  "limite-de-lances": "limite de lances do simulador", "empate-vale-pretas": "empate no armageddon (vale para as pretas)",
+  "lance-ilegal": "lance ilegal", interrompida: "partida interrompida", desistencia: "desistência", erro: "erro"
+};
+const $ = id => document.getElementById(id);
+const oposto = c => c === "brancas" ? "pretas" : "brancas";
+let estado = null, desvio = 0, selecionada = null, aba = "jogar", enviando = false;
+const chaves = {};   // o que já foi desenhado: só redesenha quando muda (é isso que evita o lag)
+
+function mudou(nome, valor) { const k = JSON.stringify(valor); if (chaves[nome] === k) return false; chaves[nome] = k; return true; }
+function corHumano() { return estado && estado.modo === "jogar" ? oposto(estado.nosso_lado) : null; }
+function corDeBaixo() { return corHumano() || (estado ? estado.nosso_lado : "brancas"); }
+function vezDoHumano() { return !!(estado && estado.rodando && estado.modo === "jogar" && estado.pensando === corHumano()); }
+
+function lerFen(fen) {
+  return fen.split(" ")[0].split("/").map(linha => {
+    const fila = [];
+    for (const c of linha) { if (/\d/.test(c)) for (let i = 0; i < +c; i++) fila.push(null); else fila.push(c); }
+    return fila;
+  });
+}
+
+function desenharTabuleiro() {
+  const legais = vezDoHumano() ? estado.legais : [];
+  const alvos = selecionada ? legais.filter(l => l.startsWith(selecionada)).map(l => l.slice(2, 4)) : [];
+  if (!mudou("tabuleiro", [estado.fen, estado.ultimo, selecionada, legais.length, estado.xeque, corDeBaixo()])) return;
+  const casas = lerFen(estado.fen), virado = corDeBaixo() === "pretas";
+  const ult = estado.ultimo ? [estado.ultimo.slice(0, 2), estado.ultimo.slice(2, 4)] : [];
+  const t = $("tabuleiro");
+  t.classList.toggle("clicavel", legais.length > 0);
+  const frag = document.createDocumentFragment();
+  for (let i = 0; i < 8; i++) for (let j = 0; j < 8; j++) {
+    const lin = virado ? 7 - i : i, col = virado ? 7 - j : j;
+    const nome = "abcdefgh"[col] + (8 - lin), peca = casas[lin][col];
+    const d = document.createElement("div");
+    d.dataset.casa = nome;
+    d.setAttribute("role", "gridcell");
+    d.className = "casa " + ((lin + col) % 2 ? "escura" : "clara") + (ult.includes(nome) ? " ultimo" : "") +
+      (nome === selecionada ? " sel" : "") + (alvos.includes(nome) ? " alvo" + (peca ? " ocupada" : "") : "") +
+      (nome === estado.xeque ? " xeque" : "");
+    if (peca) {
+      const s = document.createElement("span");
+      s.className = "peca " + (peca === peca.toUpperCase() ? "b" : "p");
+      s.textContent = PECAS[peca.toLowerCase()];
+      d.appendChild(s);
+    }
+    if (i === 7) { const c = document.createElement("span"); c.className = "coord col"; c.textContent = "abcdefgh"[col]; d.appendChild(c); }
+    if (j === 0) { const c = document.createElement("span"); c.className = "coord lin"; c.textContent = 8 - lin; d.appendChild(c); }
+    frag.appendChild(d);
+  }
+  t.replaceChildren(frag);
+  t.setAttribute("aria-label", "Tabuleiro: " + estado.fen);
+}
+
+async function clicarCasa(nome) {
+  if (!vezDoHumano() || enviando) return;
+  const legais = estado.legais;
+  if (selecionada) {
+    const candidatos = legais.filter(l => l.slice(0, 4) === selecionada + nome);
+    if (candidatos.length === 1) { await jogar(candidatos[0]); return; }
+    if (candidatos.length > 1) { escolherPromocao(selecionada, nome); return; }   // promoção: 4 opções
+  }
+  selecionada = legais.some(l => l.startsWith(nome)) && selecionada !== nome ? nome : null;
+  desenharTabuleiro();
+}
+
+function escolherPromocao(de, para) {
+  const branca = corHumano() === "brancas";
+  $("promocao-caixa").replaceChildren(...["q", "r", "b", "n"].map(p => {
+    const b = document.createElement("button");
+    b.textContent = PECAS[p]; b.className = branca ? "peca b" : "peca p";
+    b.setAttribute("aria-label", { q: "dama", r: "torre", b: "bispo", n: "cavalo" }[p]);
+    b.onclick = () => { $("promocao").classList.remove("mostrar"); jogar(de + para + p); };
+    return b;
+  }));
+  $("promocao").classList.add("mostrar");
+}
+
+async function jogar(uci) {
+  enviando = true; selecionada = null;
+  await enviar("/lance", { uci });
+  enviando = false;
+}
+
+function mmss(s) {
+  s = Math.max(0, s);
+  const m = Math.floor(s / 60), r = s - m * 60;
+  return s < 10 ? `${m}:${r.toFixed(1).padStart(4, "0")}` : `${m}:${String(Math.floor(r)).padStart(2, "0")}`;
+}
+
+function restante(cor) {
+  if (!estado || !estado.relogios) return null;
+  let t = estado.relogios[cor];
+  if (estado.rodando && estado.pensando === cor && estado.pensando_desde) t -= (Date.now() / 1000 + desvio) - estado.pensando_desde;
+  return t;
+}
+
+function nomeDe(cor) { return estado.nomes ? estado.nomes[cor] : (cor === estado.nosso_lado ? "Capablanca (nosso)" : "Adversário"); }
+
+function montarRelogio(id, cor) {   // estrutura: só quando muda quem está em cima/embaixo ou os nomes
+  if (!mudou("rel-" + id, [cor, estado.nomes, estado.nosso_lado])) return;
+  const el = $(id), nosso = cor === estado.nosso_lado;
+  el.dataset.cor = cor;
+  el.innerHTML = `<div class="nome"><i class="peao ${cor}"></i><span></span>${nosso ? '<em class="tag">nosso bot</em>' : ""}</div><div class="tempo"></div>`;
+  el.querySelector(".nome span").textContent = nomeDe(cor);
+}
+
+function atualizarRelogios() {   // 10 vezes por segundo: só texto e classes, nada de recriar HTML
+  if (!estado) return;
+  for (const id of ["relogio-cima", "relogio-baixo"]) {
+    const el = $(id), cor = el.dataset.cor;
+    if (!cor) continue;
+    const t = restante(cor);
+    el.classList.toggle("ativo", !!(estado.rodando && estado.pensando === cor));
+    el.classList.toggle("critico", t !== null && t < 10);
+    el.querySelector(".tempo").textContent = t === null ? "–:––" : mmss(t);
+  }
+}
+
+function textoAval(a) {
+  if (!a) return "–";
+  if (a.mate !== null && a.mate !== undefined) return (a.mate > 0 ? "M" : "-M") + Math.abs(a.mate);
+  if (a.cp === null || a.cp === undefined) return "–";
+  return (a.cp >= 0 ? "+" : "") + (a.cp / 100).toFixed(2);
+}
+function fracaoBrancas(a) {
+  if (!a) return 0.5;
+  if (a.mate) return a.mate > 0 ? 1 : 0;
+  if (a.cp === null || a.cp === undefined) return 0.5;
+  return 1 / (1 + Math.pow(10, -a.cp / 400));
+}
+
+function desenharBarra() {
+  const a = estado.info ? estado.info.avaliacao : (estado.avaliacoes.length ? estado.avaliacoes.at(-1) : null);
+  if (!mudou("barra", [a, corDeBaixo()])) return;
+  const f = fracaoBrancas(a), virado = corDeBaixo() === "pretas", branca = $("barra-branca");
+  branca.style.height = (f * 100) + "%";
+  branca.style.top = virado ? "0" : ""; branca.style.bottom = virado ? "" : "0";
+  const v = $("barra-valor"), txt = textoAval(a);
+  v.textContent = txt.includes("M") || txt === "–" ? txt : (+txt).toFixed(1);
+  v.style.top = virado ? `calc(${f * 100}% - 12px)` : `calc(${(1 - f) * 100}% + 2px)`;
+}
+
+function formatarNumero(n) {
+  if (n >= 1e9) return (n / 1e9).toFixed(1) + "B";
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
+  if (n >= 1e3) return (n / 1e3).toFixed(0) + "k";
+  return String(n);
+}
+
+function desenharPensamento() {
+  const info = estado.info, nossoPensando = estado.pensando === estado.nosso_lado;
+  let status = "Comece uma partida.";
+  if (estado.rodando) {
+    if (nossoPensando) status = "O bot está pensando…";
+    else if (estado.modo === "jogar" && estado.pensando) status = "Sua vez. O bot aproveita o seu tempo para ir pensando (ponder).";
+    else if (estado.pensando) status = "O adversário está pensando. Abaixo, a última análise do nosso bot.";
+    else status = "Preparando…";
+  } else if (estado.resultado) status = "Partida encerrada.";
+  if (!mudou("pensamento", [status, info])) return;
+  $("status-pensando").textContent = status;
+  $("n-prof").textContent = info ? info.profundidade : "–";
+  $("n-aval").textContent = info ? textoAval(info.avaliacao) : "–";
+  $("n-nos").textContent = info ? formatarNumero(info.nos) : "–";
+  $("n-nps").textContent = info && info.decorrido > 0 ? formatarNumero(Math.round(info.nos / info.decorrido)) : "–";
+  const pv = $("pv");
+  pv.replaceChildren();
+  if (info && info.pv.length) info.pv.forEach((l, i) => {
+    const s = document.createElement("span"); if (i === 0) s.className = "primeiro";
+    s.textContent = l + " "; pv.appendChild(s);
+  }); else pv.textContent = "—";
+}
+
+function desenharLances() {
+  const l = estado.lances;
+  if (!mudou("lances", [l.length, estado.fen])) return;
+  const el = $("lances"), perto = el.scrollTop + el.clientHeight >= el.scrollHeight - 30, frag = document.createDocumentFragment();
+  const add = (texto, classe) => { const s = document.createElement("span"); s.textContent = texto; if (classe) s.className = classe; frag.appendChild(s); };
+  const comecaPretas = l.length && l[0].cor === "pretas";
+  if (comecaPretas) { add("1.", "n"); add("…"); }
+  l.forEach((m, i) => {
+    if (m.cor === "brancas") add(Math.floor((i + (comecaPretas ? 1 : 0)) / 2) + 1 + ".", "n");
+    const s = document.createElement("span"); if (m.abertura) s.className = "ab";
+    const dentro = document.createElement("span"); dentro.textContent = m.san;
+    dentro.title = m.tempo ? m.tempo + " s" : "abertura"; if (i === l.length - 1) dentro.className = "ult";
+    s.appendChild(dentro); frag.appendChild(s);
+  });
+  el.replaceChildren(frag);
+  if (perto) el.scrollTop = el.scrollHeight;
+}
+
+function desenharGrafico() {
+  const a = estado.avaliacoes;
+  if (!mudou("grafico", [a.length, a.at(-1) || null])) return;
+  const W = 300, H = 120, LIM = 5;
+  let html = `<line x1="0" y1="${H / 2}" x2="${W}" y2="${H / 2}" stroke="currentColor" stroke-opacity=".3" stroke-dasharray="4 4"/>`;
+  if (a.length) {
+    const pts = a.map((p, i) => {
+      const v = p.mate ? (p.mate > 0 ? LIM : -LIM) : Math.max(-LIM, Math.min(LIM, (p.cp || 0) / 100));
+      return [a.length === 1 ? W / 2 : (i / (a.length - 1)) * W, H / 2 - (v / LIM) * (H / 2 - 6)];
+    });
+    const linha = pts.map(p => p.join(",")).join(" ");
+    html += `<polygon points="0,${H / 2} ${linha} ${W},${H / 2}" fill="var(--nosso)" fill-opacity=".12"/>`;
+    html += `<polyline points="${linha}" fill="none" stroke="var(--nosso)" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
+  }
+  $("grafico").innerHTML = html;
+}
+
+function desenharResultado() {
+  if (!mudou("resultado", [estado.resultado, estado.motivo, estado.modo])) return;
+  const el = $("resultado");
+  if (!estado.resultado) { el.className = "resultado"; return; }
+  let classe = "empate", titulo = "Empate";
+  if (estado.resultado === "*") titulo = "Partida interrompida";
+  else if (estado.resultado !== "1/2-1/2") {
+    const brancasGanharam = estado.resultado === "1-0", botGanhou = brancasGanharam === (estado.nosso_lado === "brancas");
+    if (estado.modo === "jogar") { titulo = botGanhou ? "O bot venceu" : "Você venceu!"; classe = botGanhou ? "derrota" : "vitoria"; }
+    else { titulo = botGanhou ? "Vitória do Capablanca" : "Derrota"; classe = botGanhou ? "vitoria" : "derrota"; }
+  }
+  el.className = "resultado mostrar " + classe;
+  el.replaceChildren(document.createTextNode(titulo));
+  const s = document.createElement("small");
+  s.textContent = `${estado.resultado} · ${MOTIVOS[estado.motivo] || estado.motivo || ""}`;
+  el.appendChild(s);
+}
+
+function desenhar() {
+  if (!estado) return;
+  if (!vezDoHumano()) selecionada = null;
+  montarRelogio("relogio-cima", oposto(corDeBaixo()));
+  montarRelogio("relogio-baixo", corDeBaixo());
+  desenharTabuleiro(); desenharBarra(); desenharPensamento(); desenharLances(); desenharGrafico(); desenharResultado();
+  atualizarRelogios();
+  const chip = $("chip");
+  chip.className = "chip" + (estado.rodando ? " ao-vivo" : "");
+  chip.textContent = estado.rodando ? (vezDoHumano() ? "sua vez" : "ao vivo") : (estado.resultado ? "encerrada" : "parado");
+  $("j-desistir").disabled = !(estado.rodando && estado.modo === "jogar");
+}
+
+async function atualizar() {
+  try {
+    const r = await fetch("/estado", { cache: "no-store" });
+    estado = await r.json();
+    desvio = estado.agora - Date.now() / 1000;
+    desenhar();
+  } catch (e) { $("chip").className = "chip"; $("chip").textContent = "servidor desligado"; }
+}
+
+async function enviar(caminho, corpo) {
+  $("erro").textContent = "";
+  try {
+    const r = await fetch(caminho, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo || {}) });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); $("erro").textContent = j.erro || ("erro " + r.status); }
+  } catch (e) { $("erro").textContent = "servidor desligado"; }
+  await atualizar();
+}
+
+function mostrarAba(nova) {
+  aba = nova;
+  $("aba-jogar").classList.toggle("ativa", aba === "jogar");
+  $("aba-assistir").classList.toggle("ativa", aba === "assistir");
+  $("form-jogar").classList.toggle("escondido", aba !== "jogar");
+  $("form-assistir").classList.toggle("escondido", aba !== "assistir");
+}
+
+async function iniciar() {
+  const op = await (await fetch("/opcoes")).json();
+  for (const r of op.relogios_jogar) $("j-relogio").add(new Option(r === "15+10" ? "15+10 (torneio)" : r, r));
+  $("j-relogio").value = "5+3";
+  for (const a of op.atrasos_jogar) $("j-atraso").add(new Option(a === 0 ? "0 s (o bot joga direto na tela)" : `${a} s (simula a mesa)`, a));
+  for (const [k, v] of Object.entries(op.oponentes)) $("a-oponente").add(new Option(v, k));
+  for (const [k, v] of Object.entries(op.controles)) $("a-controle").add(new Option(v, k));
+  $("a-atraso").textContent = op.atraso_s + " s por lance";
+  $("aba-jogar").onclick = () => mostrarAba("jogar");
+  $("aba-assistir").onclick = () => mostrarAba("assistir");
+  $("j-nova").onclick = () => enviar("/nova", { modo: "jogar", relogio: $("j-relogio").value, lado: $("j-lado").value, atraso: +$("j-atraso").value });
+  $("j-desistir").onclick = () => { if (confirm("Desistir desta partida?")) enviar("/desistir"); };
+  $("a-nova").onclick = () => enviar("/nova", { oponente: $("a-oponente").value, controle: $("a-controle").value, lado: $("a-lado").value });
+  $("a-parar").onclick = () => enviar("/parar");
+  $("tabuleiro").addEventListener("click", ev => { const c = ev.target.closest(".casa"); if (c) clicarCasa(c.dataset.casa); });
+  document.addEventListener("keydown", ev => { if (ev.key === "Escape") { selecionada = null; $("promocao").classList.remove("mostrar"); desenharTabuleiro(); } });
+  await atualizar();
+  if (estado && estado.modo === "assistir" && estado.rodando) mostrarAba("assistir");
+  setInterval(atualizar, 250);
+  setInterval(atualizarRelogios, 100);
+}
+iniciar();
+</script>
+</body>
+</html>

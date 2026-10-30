@@ -60,7 +60,10 @@ import partida
 import tempo
 from ferramentas import gerar_book
 
-VERSOES = ("nossa", "fixa", "padrao")
+VERSOES = ("nossa", "fixa", "padrao", "fraco")
+# Força do bot "fraco": Skill Level do Stockfish (0 a 20). 3 joga como um bot simples, do nível de um
+# motor feito em sala de aula, para ver como nos saímos contra adversários mais fracos.
+NIVEL_FRACO = 3
 PASTA_RESULTADOS = os.path.join(RAIZ, "testes", "resultados")
 # Cada motor do simulador usa poucos recursos por padrão, porque várias partidas rodam ao mesmo
 # tempo. Para experimentos de força (ex.: 15 threads contra 1) use --threads e --hash.
@@ -129,6 +132,7 @@ class JogadorNossa(Jogador):
         super().__init__(motor)
         self.perfil = perfil
         self.historico = []   # avaliações (centipawns) dos nossos lances, para o modo economia
+        self.ao_pensar = None  # o visualizador liga isto para mostrar o que o bot está pensando
 
     def escolher(self, board, relogio):
         try:
@@ -138,7 +142,7 @@ class JogadorNossa(Jogador):
         lance, info = partida.escolher_lance(
             board, self.motor, self.perfil,
             {"restante_s": relogio.restante, "incremento_s": relogio.incremento, "atraso_humano_s": relogio.atraso},
-            economia=economia)
+            economia=economia, ao_pensar=self.ao_pensar)
         if info["motor_caiu"]:
             raise RuntimeError("o Stockfish caiu durante a simulação")
         aval = info["avaliacao"]
@@ -171,6 +175,15 @@ class JogadorPadrao(Jogador):
         return self.motor.play(board, limite).move
 
 
+class JogadorFraco(JogadorPadrao):
+    """Stockfish enfraquecido (Skill Level baixo), com a gestão de tempo dele: simula um bot de aluno."""
+    nome = "fraco"
+
+    def __init__(self, motor, nivel=NIVEL_FRACO):
+        super().__init__(motor)
+        motor.configure({"Skill Level": nivel})
+
+
 # ======================================================================================
 # Uma partida
 # ======================================================================================
@@ -186,10 +199,24 @@ def _controle_por_cor(perfil, escala):
     return {cor: (tempo.PERFIS[chave][0] * escala, tempo.PERFIS[chave][1] * escala) for cor, chave in chaves.items()}
 
 
-def jogar_partida(branco, preto, abertura, perfil, atraso_s, escala=1.0, max_plies=MAX_PLIES_PADRAO):
+def _avisar(observador, evento, *args):
+    """Chama observador.evento(*args), se existir. Erro no observador nunca derruba a partida."""
+    funcao = getattr(observador, evento, None) if observador is not None else None
+    if funcao is not None:
+        try:
+            funcao(*args)
+        except Exception:
+            pass
+
+
+def jogar_partida(branco, preto, abertura, perfil, atraso_s, escala=1.0, max_plies=MAX_PLIES_PADRAO,
+                  observador=None, cancelar=None):
     """Joga uma partida entre dois Jogadores. `atraso_s` e `escala` já devem estar na escala da simulação.
 
     `abertura` é uma lista de chess.Move jogados sem custo de relógio.
+    `observador` (opcional, usado pelo visualizador) recebe inicio_lance(board, cor, relogios),
+    fim_lance(board, lance, pensou, relogios) e fim_partida(resumo). `cancelar` (threading.Event,
+    opcional) interrompe a partida entre um lance e outro, com resultado "*".
     Devolve um dicionário com o resultado ("1-0", "0-1", "1/2-1/2"), o motivo, e as estatísticas
     de tempo de cada cor.
     """
@@ -205,6 +232,9 @@ def jogar_partida(branco, preto, abertura, perfil, atraso_s, escala=1.0, max_pli
     resultado = motivo = None
 
     while resultado is None:
+        if cancelar is not None and cancelar.is_set():
+            resultado, motivo = "*", "interrompida"
+            break
         fim = board.outcome(claim_draw=True)
         if fim is not None:
             resultado, motivo = (fim.result(), fim.termination.name.lower())
@@ -213,6 +243,7 @@ def jogar_partida(branco, preto, abertura, perfil, atraso_s, escala=1.0, max_pli
             resultado, motivo = "1/2-1/2", "limite-de-lances"
             break
         cor = board.turn
+        _avisar(observador, "inicio_lance", board, cor, relogios)
         inicio = time.monotonic()
         lance = jogadores[cor].escolher(board, relogios[cor])
         pensou = time.monotonic() - inicio
@@ -228,6 +259,7 @@ def jogar_partida(branco, preto, abertura, perfil, atraso_s, escala=1.0, max_pli
                 resultado, motivo = ("0-1" if cor == chess.WHITE else "1-0"), "tempo"
             break
         board.push(lance)
+        _avisar(observador, "fim_lance", board, lance, pensou, relogios)
 
     if perfil == "armageddon" and resultado == "1/2-1/2":
         resultado, motivo = "0-1", "empate-vale-pretas"   # no armageddon o empate classifica as pretas
@@ -235,12 +267,14 @@ def jogar_partida(branco, preto, abertura, perfil, atraso_s, escala=1.0, max_pli
     jogo = chess.pgn.Game.from_board(board)
     jogo.headers["Result"] = resultado
     jogo.headers["Termination"] = motivo
-    return {
+    resumo = {
         "resultado": resultado, "motivo": motivo, "plies": board.ply(),
         "restante": {"brancas": relogios[chess.WHITE].restante, "pretas": relogios[chess.BLACK].restante},
         "tempo_medio_lance": {"brancas": _media(gastos[chess.WHITE]), "pretas": _media(gastos[chess.BLACK])},
         "pgn": str(jogo),
     }
+    _avisar(observador, "fim_partida", resumo)
+    return resumo
 
 
 def _media(valores):
@@ -299,6 +333,8 @@ def _criar_jogador(versao, motor, perfil, tempo_fixo_s):
         return JogadorFixa(motor, tempo_fixo_s)
     if versao == "padrao":
         return JogadorPadrao(motor)
+    if versao == "fraco":
+        return JogadorFraco(motor)
     raise ValueError(f"versão desconhecida: {versao!r}. Opções: {', '.join(VERSOES)}")
 
 

@@ -350,7 +350,7 @@ def _alvo_e_maximo(board, relogio, tempo_provisorio_s):
 
 
 def escolher_lance(board, motor, perfil, relogio, caminho_book=None, tempo_provisorio_s=None,
-                   folga_watchdog_s=None, economia=False):
+                   folga_watchdog_s=None, economia=False, ao_pensar=None):
     """book -> tempo -> Stockfish (analysis, parada em tempo real) -> devolve (lance, info).
 
     `relogio` é um dicionário: {"restante_s": ..., "incremento_s": ..., "atraso_humano_s": ...}.
@@ -372,6 +372,10 @@ def escolher_lance(board, motor, perfil, relogio, caminho_book=None, tempo_provi
     6. Watchdog (opcional): se `folga_watchdog_s` for informado e o motor passar de
        máximo + folga sem responder, fechamos o processo à força em vez de esperar para
        sempre. A folga é decisão do grupo (não tem valor padrão: regra 4).
+
+    `ao_pensar(dados)`: opcional, só para o visualizador (ferramentas/assistir.py). É chamado a cada
+    profundidade nova com {profundidade, nos, avaliacao, pv, decorrido}. Erro dentro dele é ignorado:
+    nunca atrapalha a busca. Na mesa ele não é usado.
 
     `economia=True` (quem chama decide com tempo.modo_economia, do Marcos) corta o ALVO por
     tempo.FATOR_ECONOMIA, nunca abaixo de tempo.TEMPO_MINIMO_S e nunca acima do máximo. O
@@ -457,6 +461,13 @@ def escolher_lance(board, motor, perfil, relogio, caminho_book=None, tempo_provi
                 caiu = aval_anterior is not None and aval < aval_anterior - LIMIAR_QUEDA_CP
                 aval_anterior = aval
 
+                if ao_pensar is not None:
+                    try:
+                        ao_pensar({"profundidade": info["depth"], "nos": info.get("nodes", 0),
+                                   "avaliacao": _avaliacao_para_log(info["score"].relative),
+                                   "pv": list(info["pv"]), "decorrido": time.monotonic() - inicio})
+                    except Exception:
+                        pass   # o observador nunca pode atrapalhar a busca
                 if limites is None:
                     continue  # emergência: o Limit(depth=1) já encerra sozinho
                 decorrido = time.monotonic() - inicio

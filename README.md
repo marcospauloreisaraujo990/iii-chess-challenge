@@ -142,6 +142,32 @@ Pasta `partidas/` (fora do Git): `AAAA-MM-DD_HH-MM-SS.txt` (log, uma linha por l
 número, cor, lance UCI, profundidade, nós, avaliação, PV, tempo gasto; lance de book entra com profundidade 0 e
 a palavra `book`) e `.pgn` (a partida inteira, salvo a cada lance).
 
+## Assistir o bot jogando (visualizador no navegador)
+```
+python ferramentas/assistir.py
+```
+Abre `http://127.0.0.1:8765` no navegador. Tem duas abas:
+
+**Jogar contra o bot** (padrão): você joga clicando nas peças (clique na peça e depois na casa; na promoção
+aparece a escolha da peça), com **relógio de verdade** correndo como nos sites (3+2, 5+3, 10+5, 15+10 do
+torneio ou 25+0). O nosso bot joga com o programa de verdade (book, `tempo.py`, ponder no seu tempo), então
+responde rápido no relógio curto e pensa mais no relógio longo. Do seu lado também pode jogar **o bot de
+outra máquina**: ele fala o lance e você mexe na tela. O atraso humano do bot vem em 0 s (na tela não há
+mesa); dá para simular a mesa com 6 ou 12 s.
+
+**Bot contra bot**: escolha o adversário (Stockfish com a gestão de tempo dele,
+bot fraco simulando um bot de aluno, ou tempo fixo), o relógio (rápido 3+2, que é o 15+10 em escala 0,2,
+ou o 15+10 real) e de que cor o nosso bot joga, e clique em **Nova partida**. A tela mostra o tabuleiro, os
+dois relógios correndo, a barra de avaliação, **o que o nosso bot está pensando** (profundidade, posições,
+avaliação e a linha principal), a lista de lances e o gráfico da avaliação.
+
+- É uma ferramenta de **teste e apresentação** (boa para a arguição). Nas partidas oficiais o programa da
+  mesa é o `partida.py`, no terminal.
+- Roda **sem internet**: o servidor só escuta no próprio computador (127.0.0.1) e a página não carrega nada
+  de fora. Pedidos vindos de outro endereço são recusados.
+- A partida é jogada pelo mesmo simulador dos confrontos: o nosso lado é o programa de verdade (com o
+  `tempo.py`), com atraso humano simulado de 12 s por lance (`--atraso-s` muda).
+
 ## Regras do torneio e onde o código as garante
 | Regra | Onde |
 |---|---|
