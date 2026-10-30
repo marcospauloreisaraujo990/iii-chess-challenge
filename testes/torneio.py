@@ -62,8 +62,10 @@ from ferramentas import gerar_book
 
 VERSOES = ("nossa", "fixa", "padrao")
 PASTA_RESULTADOS = os.path.join(RAIZ, "testes", "resultados")
-HASH_MB = partida.HASH_MB
-THREADS = partida.THREADS
+# Cada motor do simulador usa poucos recursos por padrão, porque várias partidas rodam ao mesmo
+# tempo. Para experimentos de força (ex.: 15 threads contra 1) use --threads e --hash.
+HASH_MB = 16
+THREADS = 1
 MAX_PLIES_PADRAO = 300          # passou disso, a partida é dada como empate (evita partida eterna)
 PLIES_DE_ABERTURA = 8           # quantos meios-lances da abertura sorteada são jogados sem custo de relógio
 PARALELO_MAXIMO = 4             # a máquina tem pouca RAM livre: no máximo 4 partidas ao mesmo tempo
@@ -308,7 +310,7 @@ def _executar_partida(tarefa):
     jogadores = []
     try:
         for versao in (tarefa["brancas"], tarefa["pretas"]):
-            motor = partida.abrir_motor(caminho, THREADS, HASH_MB, pasta_tb)
+            motor = partida.abrir_motor(caminho, tarefa.get("threads", THREADS), tarefa.get("hash_mb", HASH_MB), pasta_tb)
             jogadores.append(_criar_jogador(versao, motor, tarefa["perfil"], tarefa["tempo_fixo_s"]))
         abertura = [chess.Move.from_uci(m) for m in tarefa["abertura"]]
         resumo = jogar_partida(jogadores[0], jogadores[1], abertura, tarefa["perfil"], tarefa["atraso_s"],
@@ -320,7 +322,8 @@ def _executar_partida(tarefa):
     return resumo
 
 
-def montar_tarefas(versao_a, versao_b, n_partidas, perfil, atraso_s, escala, tempo_fixo_s, ajustes, semente, max_plies):
+def montar_tarefas(versao_a, versao_b, n_partidas, perfil, atraso_s, escala, tempo_fixo_s, ajustes, semente, max_plies,
+                   threads=THREADS, hash_mb=HASH_MB):
     """Cada abertura é jogada duas vezes, com as cores trocadas (partidas pares: A de brancas)."""
     if versao_a == versao_b:
         raise ValueError("as duas versões são iguais")
@@ -338,16 +341,17 @@ def montar_tarefas(versao_a, versao_b, n_partidas, perfil, atraso_s, escala, tem
             "brancas": versao_a if a_de_brancas else versao_b, "pretas": versao_b if a_de_brancas else versao_a,
             "perfil": perfil, "atraso_s": atraso_s * escala, "escala": escala,
             "tempo_fixo_s": None if tempo_fixo_s is None else tempo_fixo_s * escala,
-            "ajustes": ajustes, "max_plies": max_plies,
+            "ajustes": ajustes, "max_plies": max_plies, "threads": threads, "hash_mb": hash_mb,
         })
     return tarefas
 
 
 def rodar_torneio(versao_a, versao_b, n_partidas, perfil, atraso_s, escala=0.2, tempo_fixo_s=None,
-                  ajustes=None, paralelo=PARALELO_MAXIMO, semente=1, max_plies=MAX_PLIES_PADRAO, saida=print):
+                  ajustes=None, paralelo=PARALELO_MAXIMO, semente=1, max_plies=MAX_PLIES_PADRAO, saida=print,
+                  threads=THREADS, hash_mb=HASH_MB):
     """Roda `n_partidas` entre as duas versões. `atraso_s` e `tempo_fixo_s` são na escala REAL (a escala é aplicada aqui)."""
     tarefas = montar_tarefas(versao_a, versao_b, n_partidas, perfil, atraso_s, escala, tempo_fixo_s,
-                             ajustes or {}, semente, max_plies)
+                             ajustes or {}, semente, max_plies, threads, hash_mb)
     paralelo = max(1, min(paralelo, PARALELO_MAXIMO, n_partidas))
     resultados = []
     contexto = multiprocessing.get_context("spawn")
@@ -504,6 +508,8 @@ def main(argv=None):
     c.add_argument("--paralelo", type=int, default=PARALELO_MAXIMO)
     c.add_argument("--semente", type=int, default=1)
     c.add_argument("--max-plies", type=int, default=MAX_PLIES_PADRAO)
+    c.add_argument("--threads", type=int, default=THREADS, help="threads de CADA motor (padrão 1)")
+    c.add_argument("--hash", type=int, default=HASH_MB, help="hash de CADA motor, em MB (padrão 16)")
     c.add_argument("--saida", default=PASTA_RESULTADOS, help="pasta dos resultados (.md, .csv, .pgn)")
     c.add_argument("--nome", default=None, help="nome base dos arquivos de resultado")
 
@@ -519,10 +525,10 @@ def main(argv=None):
         parser.error("--escala precisa estar entre 0 (exclusive) e 1")
     resultados = rodar_torneio(args.a, args.b, args.partidas, args.perfil, args.atraso_s, args.escala,
                                args.tempo_fixo, interpretar_ajustes(args.ajuste), args.paralelo, args.semente,
-                               args.max_plies)
+                               args.max_plies, threads=args.threads, hash_mb=args.hash)
     linhas = resumir(resultados, args.a, args.b)
     titulo = (f"{args.a} x {args.b} | perfil {args.perfil} | {args.partidas} partidas | escala {args.escala:g} | "
-              f"atraso {args.atraso_s:g} s | semente {args.semente}"
+              f"atraso {args.atraso_s:g} s | semente {args.semente} | {args.threads} thread(s), {args.hash} MB"
               + (f" | ajustes {args.ajuste}" if args.ajuste else ""))
     print("\n" + tabela_markdown(linhas, titulo))
     nome = args.nome or f"{args.a}_x_{args.b}_{args.perfil.replace('+', 'mais')}"

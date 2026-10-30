@@ -547,3 +547,166 @@ def test_ctrl_c_durante_a_busca_usa_o_melhor_lance_visto(monkeypatch):
     lance, info = partida.escolher_lance(chess.Board(), MotorCtrlC(), "15+10", RELOGIO)
     assert lance in chess.Board().legal_moves
     assert info["motor_caiu"] is False   # Ctrl+C não é motor caído
+
+
+# ====================== threads e hash configuráveis ======================
+
+def test_threads_automaticas_deixam_uma_livre(monkeypatch):
+    monkeypatch.setattr(partida.os, "cpu_count", lambda: 16)
+    assert partida.threads_automaticas() == 15          # PC do torneio: 8 núcleos / 16 threads
+    monkeypatch.setattr(partida.os, "cpu_count", lambda: 1)
+    assert partida.threads_automaticas() == 1
+    monkeypatch.setattr(partida.os, "cpu_count", lambda: None)
+    assert partida.threads_automaticas() == 1
+
+
+def test_hash_automatico_e_um_oitavo_da_ram_com_teto(monkeypatch):
+    monkeypatch.setattr(partida, "_ram_total_mb", lambda: 16 * 1024)
+    assert partida.hash_automatico_mb() == 2048          # PC do torneio: 16 GB
+    monkeypatch.setattr(partida, "_ram_total_mb", lambda: 64 * 1024)
+    assert partida.hash_automatico_mb() == partida.HASH_MAXIMO_AUTO_MB
+    monkeypatch.setattr(partida, "_ram_total_mb", lambda: 64)
+    assert partida.hash_automatico_mb() == 16
+
+
+def test_sem_conseguir_ler_a_ram_usa_valor_seguro(monkeypatch):
+    monkeypatch.setattr(partida, "_ram_total_mb", lambda: None)
+    assert partida.hash_automatico_mb() == partida.HASH_SEGURO_MB
+
+
+def test_ram_desta_maquina_e_lida():
+    ram = partida._ram_total_mb()
+    assert ram is None or ram > 256
+
+
+def test_variaveis_de_ambiente_mandam(monkeypatch):
+    monkeypatch.setenv("CAPABLANCA_THREADS", "14")
+    monkeypatch.setenv("CAPABLANCA_HASH_MB", "1024")
+    assert partida.configuracao_do_motor() == (14, 1024, "definido no ambiente")
+
+
+def test_sem_variaveis_usa_o_automatico(monkeypatch):
+    monkeypatch.delenv("CAPABLANCA_THREADS", raising=False)
+    monkeypatch.delenv("CAPABLANCA_HASH_MB", raising=False)
+    monkeypatch.setattr(partida, "threads_automaticas", lambda: 15)
+    monkeypatch.setattr(partida, "hash_automatico_mb", lambda: 2048)
+    assert partida.configuracao_do_motor() == (15, 2048, "automático pelo hardware")
+
+
+@pytest.mark.parametrize("ruim", ["abc", "0", "-3", "nan"])
+def test_variavel_invalida_cai_no_automatico(monkeypatch, ruim):
+    monkeypatch.setenv("CAPABLANCA_THREADS", ruim)
+    monkeypatch.delenv("CAPABLANCA_HASH_MB", raising=False)
+    monkeypatch.setattr(partida, "threads_automaticas", lambda: 7)
+    assert partida.configuracao_do_motor()[0] == 7
+
+
+@pytest.mark.parametrize("texto,ligado", [(None, True), ("1", True), ("0", False), ("nao", False), ("OFF", False)])
+def test_ponder_liga_e_desliga_pelo_ambiente(monkeypatch, texto, ligado):
+    if texto is None:
+        monkeypatch.delenv("CAPABLANCA_PONDER", raising=False)
+    else:
+        monkeypatch.setenv("CAPABLANCA_PONDER", texto)
+    assert partida.ponder_ligado() is ligado
+
+
+class _Opcao:
+    def __init__(self, minimo, maximo):
+        self.min, self.max = minimo, maximo
+
+
+def test_valores_fora_do_limite_do_motor_sao_ajustados(monkeypatch):
+    falso = MotorFalso()
+    falso.options = {"Threads": _Opcao(1, 1024), "Hash": _Opcao(1, 33554432)}
+    monkeypatch.setattr(partida.chess.engine.SimpleEngine, "popen_uci", lambda caminho: falso)
+    partida.abrir_motor("qualquer", 5000, 0)
+    assert falso.opcoes["Threads"] == 1024 and falso.opcoes["Hash"] == 1
+
+
+@precisa_stockfish
+def test_motor_real_aceita_varias_threads_e_mais_hash():
+    motor = partida.abrir_motor(STOCKFISH, 4, 128)
+    try:
+        lance, info = partida.escolher_lance(chess.Board(), motor, "15+10", RELOGIO, tempo_provisorio_s=0.3)
+    finally:
+        motor.quit()
+    assert lance in chess.Board().legal_moves and info["profundidade"] > 0
+
+
+# ====================== ponder ======================
+
+class _AnalisePonderFalsa:
+    def __init__(self, registro):
+        import threading
+        self.registro = registro
+        self.parou = threading.Event()
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        self.parou.wait(timeout=5)
+        raise StopIteration
+
+    def stop(self):
+        self.registro.append("ponder-parou")
+        self.parou.set()
+
+
+class _MotorPonderFalso:
+    def __init__(self, registro, quebra=False):
+        self.registro = registro
+        self.quebra = quebra
+
+    def analysis(self, board, info=None):
+        if self.quebra:
+            raise RuntimeError("motor ocupado")
+        self.registro.append("ponder-comecou")
+        return _AnalisePonderFalsa(self.registro)
+
+
+def test_ponder_comeca_e_para():
+    registro = []
+    pensador = partida.Ponder(_MotorPonderFalso(registro), chess.Board())
+    pensador.parar()
+    pensador.parar()                       # parar duas vezes não quebra
+    assert registro == ["ponder-comecou", "ponder-parou"]
+    assert not pensador.fio.is_alive() if pensador.fio else True
+
+
+def test_ponder_que_falha_ao_comecar_nao_derruba(capsys):
+    pensador = partida.Ponder(_MotorPonderFalso([], quebra=True), chess.Board())
+    pensador.parar()
+    assert "Seguindo sem" in capsys.readouterr().err
+
+
+def test_ponder_usa_uma_copia_do_tabuleiro():
+    vistos = []
+
+    class Motor:
+        def analysis(self, board, info=None):
+            vistos.append(board)
+            return _AnalisePonderFalsa([])
+    board = chess.Board()
+    pensador = partida.Ponder(Motor(), board)
+    board.push_uci("e2e4")                 # mexer no tabuleiro da partida não afeta o ponder
+    pensador.parar()
+    assert vistos[0] is not board and vistos[0].fen() == chess.STARTING_FEN
+
+
+@precisa_stockfish
+def test_ponder_real_para_e_o_motor_continua_usavel():
+    motor = partida.abrir_motor(STOCKFISH, 2, 64)
+    try:
+        board = chess.Board()
+        board.push_uci("e2e4")             # vez das pretas (o "adversário" pensando)
+        pensador = partida.Ponder(motor, board)
+        time.sleep(0.5)
+        inicio = time.monotonic()
+        pensador.parar()
+        assert time.monotonic() - inicio < 2.0
+        board.push_uci("e7e5")
+        lance, info = partida.escolher_lance(board, motor, "15+10", RELOGIO, tempo_provisorio_s=0.3)
+        assert lance in board.legal_moves and info["motor_caiu"] is False
+    finally:
+        motor.quit()

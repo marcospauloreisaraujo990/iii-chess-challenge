@@ -39,10 +39,24 @@ def _pecas_no_arquivo_syzygy(nome):
     return len(base.replace("v", ""))
 
 
+def _dentro_do_limite(motor, nome, valor):
+    """Ajusta `valor` ao mínimo/máximo que o motor aceita para a opção `nome`."""
+    try:
+        opcao = motor.options[nome]
+        if opcao.min is not None:
+            valor = max(opcao.min, valor)
+        if opcao.max is not None:
+            valor = min(opcao.max, valor)
+    except Exception:
+        pass   # motor sem essa informação: manda o valor como veio
+    return valor
+
+
 def abrir_motor(caminho_stockfish, threads, hash_mb, syzygy_path=None):
     """Abre o Stockfish por UCI e configura Threads, Hash e as tablebases.
 
-    - Threads e Hash: quem chama escolhe (os valores finais saem dos testes).
+    - Threads e Hash: quem chama escolhe. Valor fora do que o Stockfish aceita é ajustado
+      para o limite dele (min/max que o próprio motor informa), em vez de dar erro.
     - SyzygyPath: aceita uma ou várias pastas (separadas por ":" no Linux, ";" no Windows).
       Pastas que não existem são avisadas na tela e ignoradas.
     - SyzygyProbeLimit fica SEMPRE em 5, então o motor nunca usa tablebase de 6 ou 7
@@ -55,7 +69,9 @@ def abrir_motor(caminho_stockfish, threads, hash_mb, syzygy_path=None):
     motor = chess.engine.SimpleEngine.popen_uci(caminho_stockfish)
     try:
         # O limite de 5 peças vai SEMPRE, com ou sem pasta de tablebases (regra do torneio).
-        opcoes = {"Threads": threads, "Hash": hash_mb, "SyzygyProbeLimit": MAX_PECAS_TABLEBASE}
+        opcoes = {"Threads": _dentro_do_limite(motor, "Threads", threads),
+                  "Hash": _dentro_do_limite(motor, "Hash", hash_mb),
+                  "SyzygyProbeLimit": MAX_PECAS_TABLEBASE}
         if syzygy_path:
             pastas = [p for p in syzygy_path.split(os.pathsep) if p]
             existentes = [p for p in pastas if os.path.isdir(p)]
@@ -225,6 +241,52 @@ def _tratar_comando_tempo(texto_mmss, ao_sincronizar, saida):
     if aceito is False:
         return  # quem chamou já explicou na tela
     saida(f"Relógio ajustado para {segundos} s.")
+
+
+class Ponder:
+    """Pensa no tempo do adversário (ponder).
+
+    Enquanto o adversário pensa e o operador digita, o Stockfish analisa a posição atual numa
+    linha de execução de fundo. Ele não escolhe lance nenhum: só enche a tabela de hash. Quando
+    o lance do adversário chega, boa parte do cálculo já está pronto, e na nossa vez o motor
+    vai mais fundo no mesmo tempo. Não mexe no relógio (é o tempo do adversário).
+
+    Regra de ouro: `parar()` SEMPRE antes de usar o motor para outra coisa. Qualquer falha
+    aqui é engolida com um aviso: o ponder nunca pode derrubar a partida.
+    """
+
+    def __init__(self, motor, board):
+        self.analise = None
+        self.fio = None
+        try:
+            self.analise = motor.analysis(board.copy(), info=chess.engine.INFO_NONE)
+            self.fio = threading.Thread(target=self._esvaziar, daemon=True)
+            self.fio.start()
+        except Exception as erro:
+            print(f"[ponder] não consegui pensar no tempo do adversário ({type(erro).__name__}). Seguindo sem.",
+                  file=sys.stderr)
+            self.analise = None
+
+    def _esvaziar(self):
+        """Lê e descarta o que o motor manda, para não acumular na memória."""
+        try:
+            for _ in self.analise:
+                pass
+        except Exception:
+            pass
+
+    def parar(self):
+        if self.analise is None:
+            return
+        try:
+            self.analise.stop()
+        except Exception:
+            pass
+        if self.fio is not None:
+            self.fio.join(timeout=5)
+            if self.fio.is_alive():
+                print("[ponder] o motor demorou para parar; se ele travou, será reiniciado.", file=sys.stderr)
+        self.analise = None
 
 
 def _avaliacao_para_log(score):
@@ -466,8 +528,9 @@ def salvar_pgn(board, caminho, cabecalhos=None):
 # ----------------------------------------------------------------------------------
 # Configuração. Nenhum valor de TEMPO tem padrão aqui (regra 4 do CLAUDE.md): atraso
 # humano, tempo de teste e folga do watchdog vêm do operador ou do ambiente.
-# Threads e Hash usam os padrões do próprio Stockfish (1 thread, 16 MB); os valores
-# finais saem dos testes do Léo.
+# Threads e Hash: padrão AUTOMÁTICO pelo hardware (todas as threads menos 1; 1/8 da RAM,
+# até 4 GB). Os valores do dia saem do verificador (ferramentas/verificar_maquina.py)
+# rodado no PC do torneio, e entram por CAPABLANCA_THREADS e CAPABLANCA_HASH_MB.
 # ----------------------------------------------------------------------------------
 # Caminhos ancorados na pasta do programa: abrir de outra pasta não muda o comportamento.
 _RAIZ = os.path.dirname(os.path.abspath(__file__))
@@ -475,9 +538,59 @@ PASTA_STOCKFISH = os.path.join(_RAIZ, "stockfish")
 CAMINHO_BOOK = os.path.join(_RAIZ, "book", "book.bin")
 PASTA_TABLEBASES = os.path.join(_RAIZ, "tablebases")
 PASTA_PARTIDAS = os.path.join(_RAIZ, "partidas")
-THREADS = 1
-HASH_MB = 16
+HASH_MAXIMO_AUTO_MB = 4096   # acima disso o ganho é pequeno e a RAM faz falta ao sistema
+HASH_SEGURO_MB = 256         # usado só se não der para ler a RAM da máquina
 TENTATIVAS_REINICIO_MOTOR = 3
+
+
+def _ram_total_mb():
+    """RAM total da máquina em MB, sem biblioteca nova. None se não der para ler."""
+    try:
+        if sys.platform == "win32":
+            import ctypes
+
+            class _Memoria(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                            ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                            ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                            ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                            ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+            estado = _Memoria()
+            estado.dwLength = ctypes.sizeof(_Memoria)
+            if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(estado)):
+                return None
+            return int(estado.ullTotalPhys // (1024 * 1024))
+        return int(os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") // (1024 * 1024))
+    except Exception:
+        return None
+
+
+def threads_automaticas():
+    """Todas as threads da CPU menos uma (fica para o sistema e para o nosso programa)."""
+    return max(1, (os.cpu_count() or 2) - 1)
+
+
+def hash_automatico_mb():
+    """1/8 da RAM, entre 16 MB e HASH_MAXIMO_AUTO_MB. Num PC de 16 GB: 2048 MB."""
+    ram = _ram_total_mb()
+    if ram is None:
+        return HASH_SEGURO_MB
+    return max(16, min(HASH_MAXIMO_AUTO_MB, ram // 8))
+
+
+def configuracao_do_motor():
+    """(threads, hash_mb, de_onde_veio). CAPABLANCA_THREADS/CAPABLANCA_HASH_MB mandam; sem elas, automático."""
+    threads = _numero_do_ambiente("CAPABLANCA_THREADS")
+    hash_mb = _numero_do_ambiente("CAPABLANCA_HASH_MB")
+    origem = "definido no ambiente" if (threads or hash_mb) else "automático pelo hardware"
+    threads = int(threads) if threads and threads >= 1 else threads_automaticas()
+    hash_mb = int(hash_mb) if hash_mb and hash_mb >= 1 else hash_automatico_mb()
+    return threads, hash_mb, origem
+
+
+def ponder_ligado():
+    """Ponder (pensar no tempo do adversário) vem ligado; CAPABLANCA_PONDER=0 desliga."""
+    return os.environ.get("CAPABLANCA_PONDER", "1").strip().lower() not in ("0", "nao", "não", "false", "off")
 
 
 def _achar_stockfish():
@@ -567,7 +680,7 @@ def _reiniciar_motor(motor_antigo, reabrir_motor, saida):
 
 def jogar_partida(minha_cor, chave_perfil, relogio, motor, entrada=input, saida=print,
                   pasta_partidas=PASTA_PARTIDAS, caminho_book=None, tempo_provisorio_s=None,
-                  folga_watchdog_s=None, reabrir_motor=None, agora=time.monotonic):
+                  folga_watchdog_s=None, reabrir_motor=None, agora=time.monotonic, ponder=False):
     """Laço da partida. Devolve o resultado ("1-0", "0-1", "1/2-1/2").
 
     Cada volta: se é a vez do adversário, lê o lance do operador (com os comandos de
@@ -585,6 +698,9 @@ def jogar_partida(minha_cor, chave_perfil, relogio, motor, entrada=input, saida=
     Robustez (travar = derrota): erro em qualquer volta é mostrado e a partida segue; se o
     motor cair, é reiniciado; se não voltar, o operador digita também o nosso lance
     ("modo manual"). EOFError (teclado fechado) sai limpo, com log e PGN já salvos.
+
+    `ponder=True`: enquanto se espera o lance do adversário, o motor pensa em segundo plano
+    (classe Ponder), e para sempre antes de voltar a ser usado.
 
     O log tem só os NOSSOS lances (são eles que têm profundidade, nós e avaliação). Os
     lances do adversário ficam no PGN. Um lance nosso desfeito continua no log.
@@ -703,7 +819,12 @@ def jogar_partida(minha_cor, chave_perfil, relogio, motor, entrada=input, saida=
                                           "e digite t mm:ss.")
                     else:
                         # --- vez do adversário ---
-                        lance = ler_lance(board, ao_sincronizar, entrada, saida)
+                        pensador = Ponder(motor, board) if (ponder and motor is not None) else None
+                        try:
+                            lance = ler_lance(board, ao_sincronizar, entrada, saida)
+                        finally:
+                            if pensador is not None:
+                                pensador.parar()
                         if lance is None:
                             esperando_go = board.turn == minha_cor
                         else:
@@ -787,8 +908,13 @@ def main(entrada=input, saida=print):
     if book_ok is None:
         saida(f"Aviso: book não encontrado em {CAMINHO_BOOK}. Jogando sem book.")
 
+    threads, hash_mb, origem = configuracao_do_motor()
+    pensar_no_tempo_do_adversario = ponder_ligado()
+    saida(f"Motor: {threads} threads, {hash_mb} MB de hash ({origem}); "
+          f"ponder {'ligado' if pensar_no_tempo_do_adversario else 'DESLIGADO'}.")
+
     def reabrir():
-        return abrir_motor(caminho_stockfish, THREADS, HASH_MB, PASTA_TABLEBASES)
+        return abrir_motor(caminho_stockfish, threads, hash_mb, PASTA_TABLEBASES)
 
     try:
         motor = reabrir()
@@ -797,7 +923,7 @@ def main(entrada=input, saida=print):
         return 2
     try:
         jogar_partida(cor, chave_perfil, relogio, motor, entrada, saida, PASTA_PARTIDAS, book_ok,
-                      tempo_provisorio_s, folga_watchdog_s, reabrir)
+                      tempo_provisorio_s, folga_watchdog_s, reabrir, ponder=pensar_no_tempo_do_adversario)
     except EOFError:
         saida("Entrada encerrada. Log e PGN foram salvos em partidas/.")
         return 1

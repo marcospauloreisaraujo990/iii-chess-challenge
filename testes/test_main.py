@@ -819,3 +819,109 @@ def test_lance_forcado_ou_de_emergencia_sem_avaliacao_real_nao_entra_como_calmo(
     assert vistos[1] == [None]            # profundidade 0: sem avaliação real
     assert vistos[2] == [None, 0]         # depth 1 tem avaliação real (0,0): conta
     assert vistos[3] == [None, 0, 40]
+
+
+# ====================== ponder dentro da partida ======================
+
+class _AnaliseRegistrada:
+    def __init__(self, registro):
+        import threading
+        self.registro = registro
+        self.parou = threading.Event()
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        self.parou.wait(timeout=5)
+        raise StopIteration
+
+    def stop(self):
+        self.registro.append("ponder-parou")
+        self.parou.set()
+
+
+class _MotorComPonder(MotorQualquer):
+    def __init__(self, registro):
+        super().__init__()
+        self.registro = registro
+
+    def analysis(self, board, info=None):
+        self.registro.append("ponder-comecou")
+        return _AnaliseRegistrada(self.registro)
+
+
+def _escolher_registrando(monkeypatch, registro, *lances):
+    fila = [chess.Move.from_uci(l) for l in lances]
+
+    def falso(*a, **k):
+        registro.append("pensar")
+        lance = fila.pop(0)
+        return lance, info_falsa(lance)
+    monkeypatch.setattr(partida, "escolher_lance", falso)
+
+
+def test_ponder_para_sempre_antes_do_motor_pensar(tmp_path, monkeypatch):
+    registro = []
+    _escolher_registrando(monkeypatch, registro, "e2e4", "g1f3")
+    with pytest.raises(EOFError):
+        partida.jogar_partida(chess.WHITE, "15+10", _relogio(), _MotorComPonder(registro), entrada=Teclado("e7e5"),
+                              saida=lambda _: None, pasta_partidas=str(tmp_path), agora=RelogioFalso(), ponder=True)
+    # pensar (e2e4) -> ponder no tempo do adversário -> para -> pensar (g1f3) -> ponder -> para (EOF)
+    assert registro == ["pensar", "ponder-comecou", "ponder-parou", "pensar", "ponder-comecou", "ponder-parou"]
+
+
+def test_ponder_para_mesmo_com_teclado_fechado(tmp_path, monkeypatch):
+    registro = []
+    _escolher_registrando(monkeypatch, registro, "e2e4")
+    with pytest.raises(EOFError):
+        partida.jogar_partida(chess.WHITE, "15+10", _relogio(), _MotorComPonder(registro), entrada=Teclado(),
+                              saida=lambda _: None, pasta_partidas=str(tmp_path), agora=RelogioFalso(), ponder=True)
+    assert registro[-1] == "ponder-parou"
+
+
+def test_ponder_desligado_nao_toca_no_motor(tmp_path, monkeypatch):
+    registro = []
+    _escolher_registrando(monkeypatch, registro, "e2e4", "g1f3")
+    with pytest.raises(EOFError):
+        partida.jogar_partida(chess.WHITE, "15+10", _relogio(), _MotorComPonder(registro), entrada=Teclado("e7e5"),
+                              saida=lambda _: None, pasta_partidas=str(tmp_path), agora=RelogioFalso(), ponder=False)
+    assert "ponder-comecou" not in registro
+
+
+def test_ponder_nao_roda_sem_motor_modo_manual(tmp_path, monkeypatch):
+    monkeypatch.setattr(partida, "escolher_lance", lambda *a, **k: (_ for _ in ()).throw(AssertionError))
+    with pytest.raises(EOFError):
+        partida.jogar_partida(chess.WHITE, "15+10", _relogio(), None, entrada=Teclado("e2e4", "e7e5"),
+                              saida=lambda _: None, pasta_partidas=str(tmp_path), agora=RelogioFalso(), ponder=True)
+
+
+def test_ponder_atravessa_desfazer_e_para_antes_de_pensar(tmp_path, monkeypatch):
+    registro = []
+    _escolher_registrando(monkeypatch, registro, "e2e4", "g1f3", "d2d4")
+    with pytest.raises(EOFError):
+        partida.jogar_partida(chess.WHITE, "15+10", _relogio(), _MotorComPonder(registro),
+                              entrada=Teclado("e7e5", "desfazer", "desfazer", "c7c5"), saida=lambda _: None,
+                              pasta_partidas=str(tmp_path), agora=RelogioFalso(), ponder=True)
+    # nunca dois "pensar" seguidos sem o ponder ter parado entre eles
+    for i, evento in enumerate(registro):
+        if evento == "ponder-comecou":
+            assert "ponder-parou" in registro[i + 1:]
+            assert registro.index("ponder-parou", i) < (registro.index("pensar", i) if "pensar" in registro[i:] else 10**9)
+
+
+def test_main_mostra_threads_hash_e_ponder(monkeypatch):
+    _com_tempo_pronto(monkeypatch)
+    monkeypatch.setenv("CAPABLANCA_THREADS", "15")
+    monkeypatch.setenv("CAPABLANCA_HASH_MB", "2048")
+    monkeypatch.delenv("CAPABLANCA_PONDER", raising=False)
+    monkeypatch.setattr(partida, "_achar_stockfish", lambda: "stockfish/x")
+    abertos = []
+    monkeypatch.setattr(partida, "abrir_motor", lambda *a: abertos.append(a) or MotorQualquer())
+    chamada = {}
+    monkeypatch.setattr(partida, "jogar_partida", lambda *a, **k: chamada.update(k) or "*")
+    tela = []
+    partida.main(entrada=Teclado("brancas", "15+10", "12"), saida=tela.append)
+    assert any("15 threads, 2048 MB" in l and "ponder ligado" in l for l in tela)
+    assert abertos[0][1:3] == (15, 2048)
+    assert chamada.get("ponder") is True
