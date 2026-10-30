@@ -1,0 +1,88 @@
+[Event "?"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "?"]
+[Black "?"]
+[Result "1-0"]
+[Termination "tempo"]
+
+1. e4 c5 2. Nf3 Nf6 3. e5 Nd5 4. Nc3 e6 5. Ne4 f5 6. Nc3 Nb4 7. Be2 a6 8. d4 cxd4 9. Nxd4 d5 10. exd6 Bxd6 11. a3 N4c6 12. Be3 O-O 13. Nxc6 Nxc6 14. Qd2 Qc7 15. O-O-O Rd8 16. Bg5 Be7 17. Qe3 Bxg5 18. Qxg5 Nd4 19. Rhe1 h6 20. Qh4 Nxe2+ 21. Nxe2 Rd7 22. Qb4 a5 23. Qb3 Kh7 24. g3 Ra6 25. Rxd7 Bxd7 26. Rd1 Be8 27. Nd4 Bh5 28. Re1 e5 29. Nxf5 Rf6 30. Qd3 Rxf5 31. g4 Bxg4 32. h3 e4 33. Qxe4 Bxh3 34. Rh1 1-0
+
+[Event "?"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "?"]
+[Black "?"]
+[Result "0-1"]
+[Termination "tempo"]
+
+1. e4 c5 2. Nf3 Nf6 3. e5 Nd5 4. Nc3 e6 5. Ne4 f5 6. Nc3 Nc6 7. Nxd5 exd5 8. d4 d6 9. Bf4 cxd4 10. exd6 Bxd6 11. Bxd6 Qxd6 12. Qd2 Bd7 13. O-O-O a6 14. Nxd4 O-O-O 15. f4 Rhe8 16. g3 Qb4 17. Qxb4 Nxb4 18. c3 Nc6 19. Bg2 Nxd4 20. Rxd4 Bc6 21. Bf3 Re3 22. Kd2 Re6 23. g4 g6 24. Rg1 Rde8 25. gxf5 gxf5 26. Rg2 Rh6 27. Bxd5 Rd8 28. Bxc6 Rxd4+ 29. cxd4 bxc6 30. Kc3 Kc7 31. Kc4 Kd6 32. b4 Rh4 0-1
+
+[Event "?"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "?"]
+[Black "?"]
+[Result "1/2-1/2"]
+[Termination "threefold_repetition"]
+
+1. d4 Nf6 2. c4 e6 3. g3 d5 4. Bg2 dxc4 5. Nf3 Nc6 6. Qa4 Bb4+ 7. Bd2 Nd5 8. Bxb4 Nxb4 9. O-O Rb8 10. Na3 O-O 11. Qb5 e5 12. Nxe5 Be6 13. Rfd1 a6 14. Nxc6 bxc6 15. Qa4 h5 16. Rd2 h4 17. Nc2 Qg5 18. Rad1 c3 19. bxc3 Nd5 20. Bxd5 cxd5 21. Qc6 Rfc8 22. Ne3 hxg3 23. hxg3 Rb6 24. Qc5 Rd6 25. c4 Qh5 26. Rb2 Bd7 27. Nxd5 Kh8 28. Ne3 Qh3 29. Nf1 Re8 30. f4 Rh6 31. Kf2 Bf5 32. Qxc7 Qh1 33. Qxf7 Bg6 34. Qd7 Rh2+ 35. Nxh2 Qxh2+ 36. Kf3 Qh5+ 37. Kf2 Qh2+ 38. Kf3 Qh5+ 39. Kf2 1/2-1/2
+
+[Event "?"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "?"]
+[Black "?"]
+[Result "0-1"]
+[Termination "tempo"]
+
+1. d4 Nf6 2. c4 e6 3. g3 d5 4. Bg2 dxc4 5. Nf3 Nc6 6. Qa4 Bb4+ 7. Bd2 Bd6 8. Na3 Bxa3 9. Qxa3 Qd6 10. Rc1 Qxa3 11. bxa3 Bd7 12. Rxc4 Nd5 13. O-O Nb6 14. Rc5 O-O-O 15. Ng5 Be8 16. Rfc1 Na4 17. Bxc6 Nxc5 18. Bxe8 Rhxe8 19. Rxc5 Rxd4 20. Be3 Rd1+ 21. Kg2 b6 22. Rc2 f6 23. Ne4 e5 24. g4 Re6 25. h4 g6 26. Bc1 Rd4 27. f3 f5 28. Ng5 Re7 29. Bb2 Rd6 30. e4 fxg4 31. fxg4 h5 0-1
+
+[Event "?"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "?"]
+[Black "?"]
+[Result "1/2-1/2"]
+[Termination "threefold_repetition"]
+
+1. e4 e5 2. f4 exf4 3. Bc4 Qh4+ 4. Kf1 Ne7 5. Nf3 Qh5 6. Nc3 d5 7. exd5 Ng6 8. Nb5 Na6 9. Qe2+ Kd8 10. d4 Nb4 11. Nc3 Bf5 12. Bb3 Bd6 13. Qf2 Re8 14. h4 Be4 15. Ba4 Re7 16. Nxe4 Rxe4 17. c4 Ne7 18. Bc2 Nxc2 19. Qxc2 Nf5 20. Rh3 Re3 21. Kg1 Nxd4 22. Nxd4 Rxh3 23. gxh3 Bc5 24. Bxf4 Bxd4+ 25. Kh2 Qf3 26. Bg3 Bc5 27. Qxh7 Qe2+ 28. Kh1 Qf3+ 29. Kh2 Kd7 30. Qxg7 Qe2+ 31. Kh1 Qf3+ 32. Kh2 Qe2+ 33. Kh1 Qe4+ 34. Kh2 1/2-1/2
+
+[Event "?"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "?"]
+[Black "?"]
+[Result "0-1"]
+[Termination "tempo"]
+
+1. e4 e5 2. f4 exf4 3. Bc4 Qh4+ 4. Kf1 Ne7 5. Nf3 Qh5 6. Nc3 d5 7. exd5 Ng6 8. d4 Bg4 9. Kf2 Be7 10. h3 Bxf3 11. Qxf3 Qh4+ 12. Kf1 Nd7 13. Ne2 Bd6 14. Qf2 O-O-O 15. Qxh4 Nxh4 16. Nxf4 Nf6 17. Bd3 Ng6 18. Nxg6 hxg6 19. Kf2 Nxd5 20. Bg5 f6 21. Bd2 Bf4 22. Rad1 Bxd2 23. Rxd2 Nf4 24. Re1 c6 25. Kf3 Nxd3 26. Rxd3 Rd7 27. Re4 Rh5 28. b3 Kc7 29. a4 a6 30. c4 Kd6 31. Rde3 b5 32. Re6+ Kc7 33. cxb5 axb5 34. Rc3 bxa4 35. Rexc6+ Kd8 36. Rc8+ Ke7 37. bxa4 Rxd4 38. R8c7+ Ke6 39. R3c6+ Kd5 40. Rc5+ Ke6 41. R5c6+ Kd5 42. Rc5+ Kd6 0-1
+
+[Event "?"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "?"]
+[Black "?"]
+[Result "1-0"]
+[Termination "tempo"]
+
+1. d4 Nf6 2. c4 e6 3. Nf3 b6 4. g3 Ba6 5. Qc2 c5 6. d5 exd5 7. cxd5 Bb7 8. Bg2 Nxd5 9. O-O Be7 10. Rd1 Nc6 11. Qf5 Nf6 12. e4 g6 13. Qf4 O-O 14. e5 Nh5 15. Qc4 Re8 16. Nc3 Ng7 17. h4 Rc8 18. Qa4 Ne6 19. Be3 Qc7 20. Rac1 Rcd8 21. Nd5 Qb8 22. h5 d6 23. Ng5 Bxg5 24. Bxg5 Nxg5 25. Nf6+ Kf8 26. Qh4 Nxe5 27. Qxg5 Bxg2 28. Kxg2 Qa8+ 29. Nd5 Re6 30. f4 Rde8 31. Rc3 Nd7 32. f5 Re2+ 33. Kh3 Kg7 34. f6+ Kh8 35. hxg6 fxg6 36. Nf4 Kg8 37. f7+ Kxf7 38. Nxe2 Rxe2 39. Qf4+ Nf6 40. Rf3 Re6 41. g4 1-0
+
+[Event "?"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "?"]
+[Black "?"]
+[Result "0-1"]
+[Termination "tempo"]
+
+1. d4 Nf6 2. c4 e6 3. Nf3 b6 4. g3 Ba6 5. b3 Bb7 6. Bg2 Bb4+ 7. Bd2 c5 8. O-O O-O 9. Bxb4 cxb4 10. a3 bxa3 11. Nxa3 a5 12. Nb5 Na6 13. Qd2 Nb4 14. Rfc1 Rc8 15. Qf4 Ne8 16. Ne5 Bxg2 17. Kxg2 d6 18. Nf3 Qd7 19. Rc3 f5 20. e4 fxe4 21. Qxe4 Rf5 22. Re3 Rxb5 23. cxb5 Nc2 24. Rae1 Nxe3+ 25. Rxe3 h6 26. Qxe6+ Qxe6 27. Rxe6 Kf7 28. Re3 Nf6 29. Nd2 Nd5 30. Re1 Rc3 31. h4 Nc7 32. Nc4 Rxb3 33. Nxd6+ Kf8 34. Nc8 Rxb5 35. Re7 Nd5 0-1
+
