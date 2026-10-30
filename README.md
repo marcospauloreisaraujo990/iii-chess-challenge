@@ -56,8 +56,36 @@ apoio do Claude Code (assistente de IA), sob revisão do responsável de cada m�
 3. **Book**: já está no Git (`book/book.bin`). Para regerar: `python ferramentas/gerar_book.py`.
 4. **Tablebases** (3 a 5 peças): `python ferramentas/baixar_tablebases.py` (~1 GB). Rodar de novo só
    baixa o que faltar. Para só conferir: `--so-conferir`.
+5. **Verificar o PC do torneio** (obrigatório, na máquina que vai para a mesa):
+   ```
+   python ferramentas/verificar_maquina.py
+   ```
+   Confere Python, python-chess, Stockfish, book e tablebases, **mede quantas threads deixam o Stockfish
+   mais rápido nessa máquina** e imprime os comandos prontos para o dia. Use o número que ele medir:
+   num notebook de teste, 6 threads foram mais rápidas que 11 (o processador reduz a velocidade quando
+   todas trabalham), então o padrão automático nem sempre é o melhor.
 
-Depois disso, **o programa não usa internet**: roda inteiro no notebook, com Wi-Fi e dados desligados.
+Depois disso, **o programa não usa internet**: roda inteiro no computador, com Wi-Fi e cabo de rede desligados.
+
+### No Windows
+1. Instale o Python 3.11+ (python.org), marcando **"Add python.exe to PATH"**.
+2. No terminal (PowerShell), na pasta do projeto:
+   ```
+   python -m venv .venv
+   .venv\Scripts\activate
+   pip install -r requirements.txt
+   ```
+   Se o PowerShell disser que scripts estão desabilitados, rode uma vez
+   `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+3. Baixe o **`stockfish-windows-x86-64-avx2.zip`** do release `sf_19` (processadores Ryzen e Intel recentes
+   têm AVX2) e coloque o `.exe` dentro de `stockfish/`.
+4. `python ferramentas/baixar_tablebases.py` e depois `python ferramentas/verificar_maquina.py`.
+5. Para o dia, defina os valores medidos e rode:
+   ```
+   $env:CAPABLANCA_THREADS=15; $env:CAPABLANCA_HASH_MB=2048; $env:CAPABLANCA_ATRASO_HUMANO_S=12
+   python partida.py
+   ```
+   (troque 15 e 2048 pelo que o verificador recomendar).
 
 ## Como rodar uma partida
 ```
@@ -84,8 +112,24 @@ na vez do adversário o operador digita o lance dele em **UCI** (`e2e4`, roque `
 - Ctrl+C não fecha a partida. Teclado fechado: salva log e PGN e sai.
 - Fim de partida por engano de digitação (ex.: mate que não existe): no aviso final digite `desfazer`.
 
+### Força do motor: threads, hash e ponder
+- **Threads e hash:** sem configuração, o programa usa todas as threads da CPU menos 1 e 1/8 da RAM
+  (até 4 GB). No PC do torneio (Ryzen 7 5800X, 16 threads, 16 GB) isso dá 15 threads e 2048 MB. Valores
+  definidos por variável são limitados ao que a máquina tem (threads) e a 3/4 da RAM (hash). A largada mostra:
+  `Motor: 15 threads, 2048 MB de hash (...); ponder ligado.`
+- **Ponder (pensar no tempo do adversário):** enquanto o adversário pensa e o operador digita, o Stockfish
+  analisa a posição em segundo plano; quando o lance chega, o cálculo já está adiantado. Medido em 12
+  posições: no caso típico, um terço a menos de trabalho para a mesma profundidade (8 de 12 melhoraram).
+  Não mexe no relógio. Se o motor não parar em 1 s, ele é reiniciado. Desliga com `CAPABLANCA_PONDER=0`.
+- **Velocidade dos lances:** quem decide quanto tempo cada lance leva é o `tempo.py` (alvo e máximo). Mais
+  threads e o ponder deixam o lance mais preciso no mesmo tempo; para responder mais rápido, o alvo do
+  `tempo.py` precisa ser recalibrado com o simulador.
+
 ### Variáveis de ambiente (opcionais)
-- `CAPABLANCA_ATRASO_HUMANO_S`: atraso humano, para não precisar digitar toda vez.
+- `CAPABLANCA_THREADS`, `CAPABLANCA_HASH_MB`: threads e hash do Stockfish (use o que o verificador medir).
+- `CAPABLANCA_PONDER=0`: desliga o ponder.
+- `CAPABLANCA_ATRASO_HUMANO_S`: atraso humano, para não precisar digitar toda vez. No ensaio de 29/10 a
+  parte humana (falar + digitar) ficou em torno de **12 s por lance**; confirmar no ensaio com tabuleiro.
 - `CAPABLANCA_FOLGA_WATCHDOG_S`: folga do vigia do motor (ver abaixo). Sem ela o vigia fica desligado e o
   programa avisa na largada.
 - `CAPABLANCA_TEMPO_PROVISORIO_S`: **só para testes**, usado quando o `tempo.py` não existe. Não vale no torneio.
@@ -111,6 +155,7 @@ a palavra `book`) e `.pgn` (a partida inteira, salvo a cada lance).
 pytest -q                                   # todos os testes
 python testes/torneio.py confronto --help   # simulador de partidas
 python testes/torneio.py estouro            # mede o estouro do motor (dado para a folga do vigia)
+python ferramentas/verificar_maquina.py     # confere o PC e mede as threads
 ```
 O simulador joga partidas automáticas com **relógio simulado e atraso artificial**, com três versões do mesmo
 Stockfish: `nossa` (o programa de verdade, com `tempo.py`), `fixa` (tempo fixo por lance) e `padrao` (a gestão
