@@ -288,3 +288,175 @@ def test_partida_antiga_nao_escreve_na_tela_da_nova(servidor, sem_abertura):
     estado = json.loads(_pedir(porta, "GET", "/estado")[1])
     assert [l["san"] for l in estado["lances"]] == ["f3", "e5", "g4", "Qh4#"]
     assert estado["rodando"] is False and estado["resultado"] == "0-1"
+
+
+# ====================== modo "jogar contra o bot" ======================
+
+class MotorFalso:
+    def __init__(self):
+        self.fechado = False
+
+    def close(self):
+        self.fechado = True
+
+
+class PonderFalso:
+    registro = []
+
+    def __init__(self, motor, board):
+        PonderFalso.registro.append("ponder-comecou")
+
+    def parar(self):
+        PonderFalso.registro.append("ponder-parou")
+        return True
+
+
+def _escolher_falso(respostas, demora=0.0, registro=None):
+    """Imita partida.escolher_lance: devolve os lances combinados, em ordem."""
+    fila = [chess.Move.from_uci(m) for m in respostas]
+
+    def escolher(board, motor, perfil, relogio, caminho_book=None, ao_pensar=None, **k):
+        if registro is not None:
+            registro.append("pensar")
+        if ao_pensar:
+            ao_pensar({"profundidade": 15, "nos": 5000, "avaliacao": 0.3, "pv": fila[:1], "decorrido": 0.1})
+        time.sleep(demora)
+        lance = fila.pop(0)
+        return lance, {"book": False, "profundidade": 15, "nos": 5000, "avaliacao": 0.3, "pv": [lance],
+                       "tempo_s": demora, "motor_caiu": False}
+    return escolher
+
+
+def _vis_jogar(respostas, demora=0.0, registro=None):
+    PonderFalso.registro = registro if registro is not None else []
+    return assistir.Visualizador(abrir_bot=MotorFalso, escolher=_escolher_falso(respostas, demora, registro),
+                                 ponder=PonderFalso)
+
+
+def _esperar(porta, condicao, limite=10):
+    fim = time.monotonic() + limite
+    while time.monotonic() < fim:
+        estado = json.loads(_pedir(porta, "GET", "/estado")[1])
+        if condicao(estado):
+            return estado
+        time.sleep(0.03)
+    raise AssertionError("condição não aconteceu a tempo")
+
+
+def test_jogar_voce_de_brancas_o_bot_responde(servidor):
+    porta = servidor(_vis_jogar(["e7e5", "b8c6"]))
+    assert _pedir(porta, "POST", "/nova", {"modo": "jogar", "lado": "pretas", "relogio": "5+3"})[0] == 200
+    estado = _esperar(porta, lambda e: e["pensando"] == "brancas")
+    assert estado["modo"] == "jogar" and len(estado["legais"]) == 20       # vez do humano: 20 lances legais
+    assert estado["nomes"]["pretas"].startswith("Capablanca")
+    assert _pedir(porta, "POST", "/lance", {"uci": "e2e4"})[0] == 200
+    estado = _esperar(porta, lambda e: len(e["lances"]) == 2 and e["pensando"] == "brancas")
+    assert [l["san"] for l in estado["lances"]] == ["e4", "e5"]
+    # relógio do humano: 300 - (o que demorou) + 3 de incremento
+    assert 300 < estado["relogios"]["brancas"] <= 303
+    assert estado["info"]["profundidade"] == 15 and estado["info"]["pv"]
+
+
+def test_jogar_lance_ilegal_ou_fora_da_vez_e_recusado(servidor):
+    porta = servidor(_vis_jogar(["e7e5"], demora=1.0))
+    _pedir(porta, "POST", "/nova", {"modo": "jogar", "lado": "pretas", "relogio": "5+3"})
+    _esperar(porta, lambda e: e["pensando"] == "brancas")
+    assert _pedir(porta, "POST", "/lance", {"uci": "e2e5"})[0] == 409        # ilegal
+    assert _pedir(porta, "POST", "/lance", {"uci": "banana"})[0] == 409
+    assert _pedir(porta, "POST", "/lance", {"uci": "e2e4"})[0] == 200
+    assert _pedir(porta, "POST", "/lance", {"uci": "d2d4"})[0] == 409        # agora é a vez do bot
+
+
+def test_jogar_bot_de_brancas_comeca_pensando(servidor):
+    porta = servidor(_vis_jogar(["e2e4"]))
+    _pedir(porta, "POST", "/nova", {"modo": "jogar", "lado": "brancas", "relogio": "3+2"})
+    estado = _esperar(porta, lambda e: len(e["lances"]) == 1)
+    assert estado["lances"][0]["san"] == "e4" and estado["pensando"] == "pretas" and estado["legais"]
+
+
+def test_jogar_humano_estoura_o_tempo(servidor, monkeypatch):
+    monkeypatch.setitem(assistir.RELOGIOS_JOGAR, "teste", (0.4, 0))
+    porta = servidor(_vis_jogar([]))
+    _pedir(porta, "POST", "/nova", {"modo": "jogar", "lado": "pretas", "relogio": "teste"})
+    estado = _esperar(porta, lambda e: e["resultado"] is not None)
+    assert (estado["resultado"], estado["motivo"]) == ("0-1", "tempo")      # você (brancas) perdeu no tempo
+    assert estado["relogios"]["brancas"] == 0.0 and estado["rodando"] is False
+
+
+def test_jogar_bot_estoura_o_tempo(servidor, monkeypatch):
+    monkeypatch.setitem(assistir.RELOGIOS_JOGAR, "teste", (0.3, 0))
+    porta = servidor(_vis_jogar(["e2e4"], demora=0.6))
+    _pedir(porta, "POST", "/nova", {"modo": "jogar", "lado": "brancas", "relogio": "teste"})
+    estado = _esperar(porta, lambda e: e["resultado"] is not None)
+    assert (estado["resultado"], estado["motivo"]) == ("0-1", "tempo")      # o bot (brancas) perdeu no tempo
+
+
+def test_jogar_desistir(servidor):
+    porta = servidor(_vis_jogar([]))
+    _pedir(porta, "POST", "/nova", {"modo": "jogar", "lado": "pretas", "relogio": "5+3"})
+    _esperar(porta, lambda e: e["pensando"] == "brancas")
+    assert _pedir(porta, "POST", "/desistir", {})[0] == 200
+    estado = _esperar(porta, lambda e: e["resultado"] is not None)
+    assert (estado["resultado"], estado["motivo"]) == ("0-1", "desistencia")
+
+
+def test_desistir_sem_partida_e_recusado(servidor):
+    porta = servidor(_vis_jogar([]))
+    assert _pedir(porta, "POST", "/desistir", {})[0] == 409
+
+
+def test_jogar_ponder_para_antes_do_bot_pensar(servidor):
+    registro = []
+    porta = servidor(_vis_jogar(["e7e5", "b8c6"], registro=registro))
+    _pedir(porta, "POST", "/nova", {"modo": "jogar", "lado": "pretas", "relogio": "5+3"})
+    _esperar(porta, lambda e: e["pensando"] == "brancas")
+    _pedir(porta, "POST", "/lance", {"uci": "e2e4"})
+    _esperar(porta, lambda e: len(e["lances"]) == 2 and e["pensando"] == "brancas")
+    _pedir(porta, "POST", "/lance", {"uci": "g1f3"})
+    _esperar(porta, lambda e: len(e["lances"]) == 4)
+    # nunca "pensar" sem o ponder anterior ter parado
+    assert registro[:6] == ["ponder-comecou", "ponder-parou", "pensar", "ponder-comecou", "ponder-parou", "pensar"]
+
+
+def test_jogar_parametros_invalidos(servidor):
+    porta = servidor(_vis_jogar([]))
+    for ruim in ({"relogio": "99+99"}, {"lado": "verde"}, {"atraso": 7}, {"atraso": "abc"}):
+        assert _pedir(porta, "POST", "/nova", {"modo": "jogar", **ruim})[0] == 400
+
+
+def test_promocao_precisa_da_peca_e_e_aceita_com_ela():
+    vis = _vis_jogar([])
+    vis.tabuleiro_humano = chess.Board("8/4P2k/8/8/8/8/8/K7 w - - 0 1")
+    with pytest.raises(ValueError):
+        vis.lance_humano("e7e8")                 # falta a peça
+    vis.lance_humano("e7e8n")                    # cavalo
+    assert vis.fila_humano.get_nowait() == ("lance", chess.Move.from_uci("e7e8n"))
+    with pytest.raises(ValueError, match="sua vez"):
+        vis.lance_humano("a1a2")                 # um lance por vez
+
+
+def test_parar_no_modo_jogar_acorda_e_encerra(servidor):
+    porta = servidor(_vis_jogar([]))
+    _pedir(porta, "POST", "/nova", {"modo": "jogar", "lado": "pretas", "relogio": "15+10"})
+    _esperar(porta, lambda e: e["pensando"] == "brancas")
+    inicio = time.monotonic()
+    _pedir(porta, "POST", "/parar", {})
+    estado = _esperar(porta, lambda e: not e["rodando"])
+    assert time.monotonic() - inicio < 3
+    assert estado["resultado"] == "*" and estado["motivo"] == "interrompida"
+
+
+@pytest.mark.skipif(__import__("partida")._achar_stockfish() is None, reason="Stockfish não instalado")
+def test_jogar_contra_o_stockfish_de_verdade(servidor, monkeypatch):
+    monkeypatch.setenv("CAPABLANCA_THREADS", "2")
+    monkeypatch.setenv("CAPABLANCA_HASH_MB", "64")
+    porta = servidor(assistir.Visualizador())
+    _pedir(porta, "POST", "/nova", {"modo": "jogar", "lado": "pretas", "relogio": "3+2"})
+    _esperar(porta, lambda e: e["pensando"] == "brancas", limite=20)
+    _pedir(porta, "POST", "/lance", {"uci": "e2e4"})
+    estado = _esperar(porta, lambda e: len(e["lances"]) == 2, limite=30)
+    resposta = chess.Move.from_uci(estado["lances"][1]["uci"])
+    board = chess.Board()
+    board.push_uci("e2e4")
+    assert resposta in board.legal_moves
+    _pedir(porta, "POST", "/parar", {})
