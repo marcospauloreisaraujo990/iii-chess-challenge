@@ -77,8 +77,11 @@ Depois disso, **o programa não usa internet**: roda inteiro no computador, com 
    ```
    Se o PowerShell disser que scripts estão desabilitados, rode uma vez
    `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
-3. Baixe o **`stockfish-windows-x86-64-avx2.zip`** do release `sf_19` (processadores Ryzen e Intel recentes
-   têm AVX2) e coloque o `.exe` dentro de `stockfish/`.
+3. Baixe o **`stockfish-windows-x86-64-universal.zip`** do release `sf_19` (o mesmo release do Linux; o build
+   universal escolhe sozinho as instruções do processador), confira o SHA-256
+   `3c8bf1f9ea66a09350a40df4f632288285ac206d99f33ab5842c408fc30b48a7`
+   (PowerShell: `Get-FileHash .\stockfish-windows-x86-64-universal.zip`), descompacte e coloque o `.exe`
+   dentro de `stockfish/`.
 4. `python ferramentas/baixar_tablebases.py` e depois `python ferramentas/verificar_maquina.py`.
 5. Para o dia, defina os valores medidos e rode:
    ```
