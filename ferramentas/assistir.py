@@ -240,6 +240,8 @@ class Visualizador:
 
     @staticmethod
     def validar(pedido):
+        if any(not isinstance(pedido.get(k, ""), str) for k in ("oponente", "controle", "lado")):
+            raise ValueError("oponente, controle e lado precisam ser texto")
         oponente = pedido.get("oponente", "padrao")
         controle = pedido.get("controle", "rapido")
         lado = pedido.get("lado", "brancas")
@@ -253,6 +255,8 @@ class Visualizador:
 
     @staticmethod
     def validar_jogar(pedido):
+        if any(not isinstance(pedido.get(k, ""), str) for k in ("lado", "relogio")):
+            raise ValueError("lado e relógio precisam ser texto")
         lado = pedido.get("lado", "pretas")
         relogio = pedido.get("relogio", "5+3")
         try:
@@ -399,7 +403,12 @@ class Visualizador:
                         resultado, motivo = "*", "interrompida"
                         break
                     gasto = time.monotonic() - inicio_vez + atraso   # o atraso simula o tempo da mesa
+                    analisou = info.get("profundidade", 0) > 0
                     if info.get("motor_caiu"):
+                        try:
+                            motor.close()          # nunca deixar o processo antigo aberto
+                        except Exception:
+                            pass
                         motor = self.abrir_bot()   # o lance devolvido vale; o motor é trocado
                         if ativa():
                             self.fechar_motores = motor.close
@@ -410,14 +419,17 @@ class Visualizador:
                                                     "pv": _pv_em_san(board, info["pv"])})
                 else:
                     with self.trava_lance:
-                        self.tabuleiro_humano = board.copy()
+                        if ativa():
+                            self.tabuleiro_humano = board.copy()
                     mostrar(pensando=nome[cor], pensando_desde=time.time(),
                             legais=[l.uci() for l in board.legal_moves])
                     pensador = self.ponder(motor, board)   # o bot pensa no seu tempo, como na mesa
                     try:
                         item = fila.get(timeout=max(0.0, restante[cor]))
+                        chegou = time.monotonic()   # o relógio do humano para aqui
                     except queue.Empty:
                         item = ("tempo", None)
+                        chegou = time.monotonic()
                     finally:
                         if not pensador.parar():
                             motor.close()
@@ -425,8 +437,9 @@ class Visualizador:
                             if ativa():
                                 self.fechar_motores = motor.close
                         with self.trava_lance:
-                            self.tabuleiro_humano = None
-                    gasto = time.monotonic() - inicio_vez
+                            if ativa():
+                                self.tabuleiro_humano = None
+                    gasto = chegou - inicio_vez
                     tipo, lance = item
                     if tipo == "parar" or cancelar.is_set():
                         resultado, motivo = "*", "interrompida"
@@ -450,7 +463,7 @@ class Visualizador:
                 if ativa():
                     self.estado.acrescentar("lances", {"san": san, "uci": lance.uci(), "cor": nome[cor],
                                                        "tempo": round(gasto, 2)})
-                    if cor == bot:
+                    if cor == bot and analisou:
                         info_atual = self.estado.copia()["info"]
                         if info_atual:
                             self.estado.acrescentar("avaliacoes", {"lance": len(board.move_stack),
@@ -465,7 +478,8 @@ class Visualizador:
                     resultado, motivo = "*", "erro"
         finally:
             with self.trava_lance:
-                self.tabuleiro_humano = None
+                if ativa():
+                    self.tabuleiro_humano = None
             if motor is not None:
                 try:
                     motor.close()
@@ -562,7 +576,7 @@ def _criar_manipulador(visualizador):
             if caminho == "/nova":
                 try:
                     visualizador.nova(pedido)
-                except ValueError as erro:
+                except (ValueError, TypeError) as erro:
                     return self._responder(400, {"erro": str(erro)})
                 return self._responder(200, {"ok": True})
             if caminho == "/parar":

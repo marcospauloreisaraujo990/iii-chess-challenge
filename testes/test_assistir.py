@@ -460,3 +460,57 @@ def test_jogar_contra_o_stockfish_de_verdade(servidor, monkeypatch):
     board.push_uci("e2e4")
     assert resposta in board.legal_moves
     _pedir(porta, "POST", "/parar", {})
+
+
+# ---- correções da revisão do modo jogar ----
+
+def test_pedido_com_tipo_errado_da_400_e_nao_derruba(servidor):
+    porta = servidor(_vis_jogar([]))
+    assert _pedir(porta, "POST", "/nova", {"modo": "jogar", "relogio": ["5+3"]})[0] == 400
+    assert _pedir(porta, "POST", "/nova", {"oponente": [1]})[0] == 400
+    assert _pedir(porta, "GET", "/estado")[0] == 200          # o servidor continua de pé
+
+
+def test_motor_que_caiu_e_fechado_antes_de_abrir_outro(servidor):
+    abertos = []
+
+    def abrir():
+        abertos.append(MotorFalso())
+        return abertos[-1]
+
+    def escolher(board, motor, perfil, relogio, caminho_book=None, ao_pensar=None, **k):
+        lance = chess.Move.from_uci("e2e4")
+        return lance, {"book": False, "profundidade": 10, "nos": 1, "avaliacao": 0.1, "pv": [lance],
+                       "tempo_s": 0.0, "motor_caiu": True}
+    PonderFalso.registro = []
+    porta = servidor(assistir.Visualizador(abrir_bot=abrir, escolher=escolher, ponder=PonderFalso))
+    _pedir(porta, "POST", "/nova", {"modo": "jogar", "lado": "brancas", "relogio": "5+3"})
+    _esperar(porta, lambda e: len(e["lances"]) == 1)
+    assert len(abertos) == 2 and abertos[0].fechado is True   # o motor antigo foi fechado
+
+
+def test_parar_o_ponder_nao_conta_no_relogio_do_humano(servidor):
+    class PonderLento(PonderFalso):
+        def parar(self):
+            time.sleep(0.6)            # o bot demora para parar de pensar
+            return True
+    PonderFalso.registro = []
+    porta = servidor(assistir.Visualizador(abrir_bot=MotorFalso, escolher=_escolher_falso(["e7e5"]), ponder=PonderLento))
+    _pedir(porta, "POST", "/nova", {"modo": "jogar", "lado": "pretas", "relogio": "5+3"})
+    _esperar(porta, lambda e: e["pensando"] == "brancas")
+    _pedir(porta, "POST", "/lance", {"uci": "e2e4"})
+    estado = _esperar(porta, lambda e: len(e["lances"]) == 2)
+    # 300 - (o que o humano demorou, bem menos de 0,6 s) + 3 de incremento
+    assert estado["relogios"]["brancas"] > 302.5
+
+
+def test_lance_do_bot_sem_analise_nao_entra_no_grafico(servidor):
+    def escolher_book(board, motor, perfil, relogio, caminho_book=None, ao_pensar=None, **k):
+        lance = chess.Move.from_uci("e2e4")
+        return lance, {"book": True, "profundidade": 0, "nos": 0, "avaliacao": 0.0, "pv": [lance],
+                       "tempo_s": 0.0, "motor_caiu": False}
+    PonderFalso.registro = []
+    porta = servidor(assistir.Visualizador(abrir_bot=MotorFalso, escolher=escolher_book, ponder=PonderFalso))
+    _pedir(porta, "POST", "/nova", {"modo": "jogar", "lado": "brancas", "relogio": "5+3"})
+    estado = _esperar(porta, lambda e: len(e["lances"]) == 1)
+    assert estado["avaliacoes"] == []
