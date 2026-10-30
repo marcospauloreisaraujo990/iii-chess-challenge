@@ -20,6 +20,7 @@ import json
 import os
 import queue
 import random
+import re
 import sys
 import threading
 import time
@@ -34,6 +35,7 @@ if RAIZ not in sys.path:
 import chess
 
 import partida
+import tempo
 from testes import torneio
 
 PAGINA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assistir.html")
@@ -42,6 +44,7 @@ HASH_POR_MOTOR_MB = 256
 
 OPONENTES = {
     "padrao": "Stockfish (gestão de tempo dele)",
+    "lichess8": f"Lichess nível 8 (prof. {torneio.LICHESS8_PROFUNDIDADE}, {torneio.LICHESS8_TEMPO_S:g} s)",
     "fraco": f"Bot fraco (Stockfish nível {torneio.NIVEL_FRACO})",
     "fixa": "Stockfish com tempo fixo por lance",
 }
@@ -53,9 +56,27 @@ CONTROLES = {
 }
 LADOS = ("brancas", "pretas")
 # Modo "jogar contra o bot": relógios de verdade, como nos sites. (inicial em s, incremento em s)
-RELOGIOS_JOGAR = {"3+2": (180, 2), "5+3": (300, 3), "10+5": (600, 5), "15+10": (900, 10), "25+0": (1500, 0)}
+#
+# "ilimitado" é o modo SEM TEMPO: ninguém perde por bandeira, dos dois lados. O relógio do bot NÃO
+# anda: o tempo.py recebe sempre o mesmo restante, então o bot pensa o mesmo em todo lance e a
+# partida nunca acaba por tempo. É o modo para usar a tela como PONTE, quando o relógio de verdade
+# está em outro lugar (Lichess, cronômetro da mesa) e o nosso relógio só atrapalharia.
+#
+# A base é o 5+3 porque é a que dá o ritmo do torneio. Medido com tempo.calcular_tempo(atraso 0),
+# alvo e máximo por lance: 5+3 -> 6 a 8 s (máx. 15 a 21 s); 15+10 -> 19 a 26 s (máx. 48 a 66 s,
+# lento demais para ponte: estouraria o relógio do outro lado); 3+2 -> 4 a 5 s (máx. 9 a 13 s).
+RELOGIO_ILIMITADO = "ilimitado"
+RELOGIOS_JOGAR = {"3+2": (180, 2), "5+3": (300, 3), "10+5": (600, 5), "15+10": (900, 10), "25+0": (1500, 0),
+                  RELOGIO_ILIMITADO: (300, 3)}
 ATRASOS_JOGAR = (0, 6, 12)   # atraso humano simulado do nosso bot; na tela não há mesa, então o padrão é 0
 NOME_HUMANO = "Você (ou o bot da outra máquina)"
+
+# Letras das peças em português -> inglês, para aceitar o lance como ele aparece numa tela em
+# português (Lichess, Chess.com). "B" é bispo nas duas línguas. O "R" é ambíguo (Rei em português,
+# Rook/torre em inglês), então o texto é tentado primeiro SEM tradução: "Rd1" vale torre, como no
+# padrão internacional.
+LETRAS_PT = {"D": "Q", "C": "N", "T": "R", "R": "K"}
+_ROQUE = re.compile(r"^[0oO]-[0oO](-[0oO])?$")
 TEMPO_FIXO_REAL_S = 10.0   # só para o oponente "fixa": referência de teste, não vale para a mesa
 TAMANHO_MAXIMO_PEDIDO = 4096   # bytes: os pedidos da página são minúsculos
 # Proteções do navegador: a página não pode ser embutida em outro site nem carregar nada de fora.
@@ -65,6 +86,45 @@ CABECALHOS_SEGURANCA = {
     "Content-Security-Policy": ("default-src 'self'; style-src 'self' 'unsafe-inline'; "
                                 "script-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'"),
 }
+
+
+def interpretar_lance(board, texto):
+    """Texto digitado -> chess.Move legal nesta posição. ValueError com explicação se não der.
+
+    Aceita as três formas que aparecem nas telas de xadrez, para a pessoa poder copiar o lance
+    do outro programa sem traduzir nada:
+        UCI  : e2e4, e1g1 (roque), e7e8q (promoção)   <- o formato da mesa do torneio
+        SAN  : e4, Nf3, exd5, O-O, e8=Q
+        SAN em português: Cf3, Txd5, Dh5, O-O
+    """
+    texto = str(texto).strip()
+    if not texto:
+        raise ValueError("digite um lance (exemplo: e2e4)")
+    if _ROQUE.match(texto):
+        texto = texto.upper().replace("0", "O")
+    try:
+        lance = chess.Move.from_uci(texto.lower())
+    except ValueError:
+        pass                      # não é UCI; tentamos SAN abaixo
+    else:
+        if lance in board.legal_moves:
+            return lance
+        raise ValueError(f"lance ilegal nesta posição: {texto}")
+    traduzido = LETRAS_PT.get(texto[0], texto[0]) + texto[1:]
+    lances = []
+    for versao in (texto, traduzido):
+        try:
+            lances.append(board.parse_san(versao))   # parse_san só devolve lance legal
+        except ValueError:
+            pass
+    if not lances:
+        raise ValueError(f"não entendi o lance: {texto} (use e2e4, Cf3 ou Nf3)")
+    if len(lances) == 2 and lances[0] != lances[1]:
+        # Só acontece com "R": Rd1 é torre em inglês e rei em português, e as duas são legais.
+        # Em vez de adivinhar e jogar o lance errado, pedimos o formato sem ambiguidade.
+        raise ValueError(f"{texto} é ambíguo (torre em inglês, rei em português): "
+                         f"escreva em UCI, {lances[0].uci()} ou {lances[1].uci()}")
+    return lances[0]
 
 
 def _aval_brancas(avaliacao, vez):
@@ -240,6 +300,8 @@ class Visualizador:
 
     @staticmethod
     def validar(pedido):
+        if any(not isinstance(pedido.get(k, ""), str) for k in ("oponente", "controle", "lado")):
+            raise ValueError("oponente, controle e lado precisam ser texto")
         oponente = pedido.get("oponente", "padrao")
         controle = pedido.get("controle", "rapido")
         lado = pedido.get("lado", "brancas")
@@ -253,6 +315,8 @@ class Visualizador:
 
     @staticmethod
     def validar_jogar(pedido):
+        if any(not isinstance(pedido.get(k, ""), str) for k in ("lado", "relogio")):
+            raise ValueError("lado e relógio precisam ser texto")
         lado = pedido.get("lado", "pretas")
         relogio = pedido.get("relogio", "5+3")
         try:
@@ -325,27 +389,24 @@ class Visualizador:
             self.fila_humano = queue.Queue()
             humano = "pretas" if lado == "brancas" else "brancas"
             inicio, incremento = RELOGIOS_JOGAR[relogio]
+            ilimitado = relogio == RELOGIO_ILIMITADO
             self.estado.reiniciar(rodando=True, modo="jogar", nosso_lado=lado, oponente=NOME_HUMANO,
-                                  controle=f"{relogio} (relógio real)",
+                                  controle=("sem limite de tempo" if ilimitado else f"{relogio} (relógio real)"),
                                   nomes={lado: "Capablanca (nosso bot)", humano: NOME_HUMANO},
-                                  relogios={"brancas": float(inicio), "pretas": float(inicio)})
+                                  relogios=(None if ilimitado
+                                            else {"brancas": float(inicio), "pretas": float(inicio)}))
             self.fio = threading.Thread(target=self._jogar_humano, daemon=True,
                                         args=(lado, inicio, incremento, atraso, self.cancelar, self.geracao,
-                                              self.fila_humano))
+                                              self.fila_humano, ilimitado))
             self.fio.start()
 
     def lance_humano(self, uci):
-        """Recebe o lance do lado humano. Erro (ValueError) se não for a vez dele ou se for ilegal."""
+        """Recebe o lance do lado humano (UCI ou SAN). Erro (ValueError) se não for a vez dele ou se for ilegal."""
         with self.trava_lance:
             board = self.tabuleiro_humano
             if board is None:
                 raise ValueError("não é a sua vez")
-            try:
-                lance = chess.Move.from_uci(str(uci))
-            except ValueError:
-                raise ValueError(f"lance inválido: {uci!r}")
-            if lance not in board.legal_moves:
-                raise ValueError(f"lance ilegal nesta posição: {uci}")
+            lance = interpretar_lance(board, uci)
             self.tabuleiro_humano = None   # um lance por vez
             self.fila_humano.put(("lance", lance))
 
@@ -356,7 +417,7 @@ class Visualizador:
             self.tabuleiro_humano = None
             self.fila_humano.put(("desistir", None))
 
-    def _jogar_humano(self, lado, inicio, incremento, atraso, cancelar, geracao, fila):
+    def _jogar_humano(self, lado, inicio, incremento, atraso, cancelar, geracao, fila, ilimitado=False):
         bot = chess.WHITE if lado == "brancas" else chess.BLACK
         nome = {chess.WHITE: "brancas", chess.BLACK: "pretas"}
         ativa = lambda: self.geracao == geracao
@@ -366,11 +427,13 @@ class Visualizador:
         caminho_book = partida.CAMINHO_BOOK if os.path.isfile(partida.CAMINHO_BOOK) else None
         motor = None
         resultado = motivo = None
+        historico_aval = []   # avaliações dos lances do bot, para o modo economia do tempo.py
 
         def mostrar(**extra):
             if ativa():
-                self.estado.atualizar(fen=board.fen(), relogios={"brancas": restante[chess.WHITE],
-                                                                  "pretas": restante[chess.BLACK]},
+                self.estado.atualizar(fen=board.fen(),
+                                      relogios=(None if ilimitado else {"brancas": restante[chess.WHITE],
+                                                                        "pretas": restante[chess.BLACK]}),
                                       xeque=(chess.square_name(board.king(board.turn))
                                              if board.is_check() and board.king(board.turn) is not None else None),
                                       **extra)
@@ -391,15 +454,30 @@ class Visualizador:
                 if cor == bot:
                     mostrar(pensando=nome[cor], pensando_desde=time.time(), legais=[])
                     observador.tabuleiro_pensando = board.copy(stack=False)
+                    # o mesmo cálculo do partida.py e do simulador: a tela tem que ser réplica da mesa
+                    try:
+                        economia = bool(tempo.modo_economia(historico_aval,
+                                                            tempo.material_em_centipawns(board)))
+                    except Exception:   # bug no código de tempo não pode derrubar a partida
+                        economia = False
                     lance, info = self.escolher(
                         board, motor, "visualizador",
                         {"restante_s": restante[cor], "incremento_s": incremento, "atraso_humano_s": atraso},
-                        caminho_book=caminho_book, ao_pensar=observador.ao_pensar)
+                        caminho_book=caminho_book, economia=economia, ao_pensar=observador.ao_pensar)
+                    aval_bot = info.get("avaliacao")
+                    historico_aval.append(round(aval_bot * 100)
+                                          if partida._numero_finito(aval_bot) and info.get("profundidade", 0) > 0
+                                          else None)
                     if cancelar.is_set():
                         resultado, motivo = "*", "interrompida"
                         break
                     gasto = time.monotonic() - inicio_vez + atraso   # o atraso simula o tempo da mesa
+                    analisou = info.get("profundidade", 0) > 0
                     if info.get("motor_caiu"):
+                        try:
+                            motor.close()          # nunca deixar o processo antigo aberto
+                        except Exception:
+                            pass
                         motor = self.abrir_bot()   # o lance devolvido vale; o motor é trocado
                         if ativa():
                             self.fechar_motores = motor.close
@@ -410,14 +488,18 @@ class Visualizador:
                                                     "pv": _pv_em_san(board, info["pv"])})
                 else:
                     with self.trava_lance:
-                        self.tabuleiro_humano = board.copy()
+                        if ativa():
+                            self.tabuleiro_humano = board.copy()
                     mostrar(pensando=nome[cor], pensando_desde=time.time(),
                             legais=[l.uci() for l in board.legal_moves])
                     pensador = self.ponder(motor, board)   # o bot pensa no seu tempo, como na mesa
                     try:
-                        item = fila.get(timeout=max(0.0, restante[cor]))
+                        # sem limite: espera o lance para sempre, nunca cai a bandeira
+                        item = fila.get(timeout=None if ilimitado else max(0.0, restante[cor]))
+                        chegou = time.monotonic()   # o relógio do humano para aqui
                     except queue.Empty:
                         item = ("tempo", None)
+                        chegou = time.monotonic()
                     finally:
                         if not pensador.parar():
                             motor.close()
@@ -425,8 +507,9 @@ class Visualizador:
                             if ativa():
                                 self.fechar_motores = motor.close
                         with self.trava_lance:
-                            self.tabuleiro_humano = None
-                    gasto = time.monotonic() - inicio_vez
+                            if ativa():
+                                self.tabuleiro_humano = None
+                    gasto = chegou - inicio_vez
                     tipo, lance = item
                     if tipo == "parar" or cancelar.is_set():
                         resultado, motivo = "*", "interrompida"
@@ -436,21 +519,22 @@ class Visualizador:
                         break
                     if tipo == "tempo":
                         gasto = restante[cor] + 0.001
-                restante[cor] -= gasto
-                if restante[cor] <= 0:
-                    restante[cor] = 0.0
-                    if board.has_insufficient_material(not cor):
-                        resultado, motivo = "1/2-1/2", "tempo-sem-material"
-                    else:
-                        resultado, motivo = ("0-1" if cor == chess.WHITE else "1-0"), "tempo"
-                    break
-                restante[cor] += incremento
+                if not ilimitado:
+                    restante[cor] -= gasto
+                    if restante[cor] <= 0:
+                        restante[cor] = 0.0
+                        if board.has_insufficient_material(not cor):
+                            resultado, motivo = "1/2-1/2", "tempo-sem-material"
+                        else:
+                            resultado, motivo = ("0-1" if cor == chess.WHITE else "1-0"), "tempo"
+                        break
+                    restante[cor] += incremento
                 san = board.san(lance)
                 board.push(lance)
                 if ativa():
                     self.estado.acrescentar("lances", {"san": san, "uci": lance.uci(), "cor": nome[cor],
                                                        "tempo": round(gasto, 2)})
-                    if cor == bot:
+                    if cor == bot and analisou:
                         info_atual = self.estado.copia()["info"]
                         if info_atual:
                             self.estado.acrescentar("avaliacoes", {"lance": len(board.move_stack),
@@ -465,7 +549,8 @@ class Visualizador:
                     resultado, motivo = "*", "erro"
         finally:
             with self.trava_lance:
-                self.tabuleiro_humano = None
+                if ativa():
+                    self.tabuleiro_humano = None
             if motor is not None:
                 try:
                     motor.close()
@@ -562,7 +647,7 @@ def _criar_manipulador(visualizador):
             if caminho == "/nova":
                 try:
                     visualizador.nova(pedido)
-                except ValueError as erro:
+                except (ValueError, TypeError) as erro:
                     return self._responder(400, {"erro": str(erro)})
                 return self._responder(200, {"ok": True})
             if caminho == "/parar":

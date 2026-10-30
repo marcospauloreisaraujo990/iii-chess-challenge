@@ -149,8 +149,13 @@ python ferramentas/assistir.py
 Abre `http://127.0.0.1:8765` no navegador. Tem duas abas:
 
 **Jogar contra o bot** (padrão): você joga clicando nas peças (clique na peça e depois na casa; na promoção
-aparece a escolha da peça), com **relógio de verdade** correndo como nos sites (3+2, 5+3, 10+5, 15+10 do
-torneio ou 25+0). O nosso bot joga com o programa de verdade (book, `tempo.py`, ponder no seu tempo), então
+aparece a escolha da peça) **ou digitando o lance** no campo de texto, que aceita `e2e4` (UCI), `e4`/`Nf3`
+(inglês) e `Cf3`/`Txd5` (português) — útil quando você está copiando o lance de outra tela. O lance que o
+nosso bot jogou aparece em destaque, para você repetir do outro lado. Relógio de verdade correndo como nos
+sites (3+2, 5+3, 10+5, 15+10 do torneio ou 25+0), ou **sem limite de tempo**: nesse modo ninguém perde por
+bandeira, os relógios mostram `∞` e o bot pensa cerca de 7 s por lance (o `tempo.py` recebe sempre o mesmo
+relógio, então o ritmo não muda). Use o sem limite quando o relógio de verdade estiver em outro lugar — numa
+partida do Lichess ou no cronômetro da mesa — e a tela servir só de ponte. O nosso bot joga com o programa de verdade (book, `tempo.py`, ponder no seu tempo), então
 responde rápido no relógio curto e pensa mais no relógio longo. Do seu lado também pode jogar **o bot de
 outra máquina**: ele fala o lance e você mexe na tela. O atraso humano do bot vem em 0 s (na tela não há
 mesa); dá para simular a mesa com 6 ou 12 s.
@@ -186,10 +191,38 @@ python testes/torneio.py confronto --help   # simulador de partidas
 python testes/torneio.py estouro            # mede o estouro do motor (dado para a folga do vigia)
 python ferramentas/verificar_maquina.py     # confere o PC e mede as threads
 ```
-O simulador joga partidas automáticas com **relógio simulado e atraso artificial**, com três versões do mesmo
-Stockfish: `nossa` (o programa de verdade, com `tempo.py`), `fixa` (tempo fixo por lance) e `padrao` (a gestão
-de tempo do próprio Stockfish). Alterna as cores e usa aberturas variadas. Mede vitórias, empates, derrotas,
-**derrotas por tempo** e o tempo que sobrou. O `--atraso-s` é obrigatório: não existe valor padrão.
+O simulador joga partidas automáticas com **relógio simulado e atraso artificial**, com cinco versões do mesmo
+Stockfish: `nossa` (o programa de verdade, com `tempo.py`), `fixa` (tempo fixo por lance), `padrao` (a gestão
+de tempo do próprio Stockfish), `fraco` (Skill Level 3, simula um bot de aluno) e `lichess8` (ver abaixo).
+Alterna as cores e usa aberturas variadas. Mede vitórias, empates, derrotas, **derrotas por tempo** e o tempo
+que sobrou. O `--atraso-s` é obrigatório: não existe valor padrão.
+
+### Régua externa: o "nível 8" do Lichess
+A versão `lichess8` emula o mais forte dos 8 níveis do *jogar contra o computador* do Lichess: avaliação em
+força máxima (Skill Level 20, que é o padrão) com a **busca algemada em profundidade 22 e ~1 s por lance**.
+Esses são os valores que o Lichess passa ao Stockfish no **fishnet**, o programa que joga esses níveis.
+Conferidos no código-fonte dele, em `impl SkillLevel` de
+[`fishnet/src/api.rs`](https://github.com/lichess-org/fishnet/blob/master/src/api.rs), que para o nível 8
+devolve `skill_level() = 20`, `depth() = 22` e `time() = 1000 ms`. **Nenhuma linha de código do Lichess foi
+copiada**: a classe `JogadorLichess8` é nossa (5 linhas) e só passa esses dois limites ao mesmo Stockfish que
+o projeto já usa.
+
+Serve para responder, com placar, "o nosso bot é forte?" usando um adversário que qualquer um conhece e pode
+conferir, em vez de comparar o nosso código com ele mesmo. **O nosso bot não é limitado assim**: roda Skill
+Level 20 sem teto de profundidade, com ~10 s por lance, 15 threads, book e tablebases — ou seja, o nível 8 é a
+nossa régua, não a nossa meta.
+
+```
+python testes/torneio.py confronto --a nossa --b lichess8 --perfil 15+10 \
+    --partidas 8 --atraso-s 12 --escala 0.2 --paralelo 4
+```
+Os limites do `lichess8` são absolutos e **não entram na escala**: com `--escala` baixa o nosso lado pensa
+menos e o adversário continua inteiro, então o teste fica mais difícil para nós, nunca mais fácil.
+
+Duas ressalvas, para a comparação ser defendida com honestidade: a emulação copia a **algema** (Skill Level,
+profundidade e tempo), não o servidor do Lichess, que tem hardware diferente; e no simulador os dois motores
+recebem as tablebases, enquanto o Lichess não as usa nesses níveis. As duas ressalvas pesam **contra** nós
+(o adversário emulado fica um pouco mais forte que o original), então o placar é um piso, não um teto.
 
 ## Resultados dos testes (para a arguição)
 <!--RESULTADOS-->

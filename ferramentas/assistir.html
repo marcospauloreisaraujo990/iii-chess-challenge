@@ -127,6 +127,17 @@
   .resultado.derrota { background: color-mix(in srgb, var(--perigo) 18%, transparent); color: var(--perigo); }
   .resultado.empate { background: var(--fundo); }
   .resultado small { display: block; font-weight: 500; color: var(--suave); margin-top: 2px; }
+  .ponte { grid-column: 1 / -1; display: grid; gap: 8px; }
+  .ponte .diga { background: var(--fundo); border-radius: 8px; padding: 8px 10px; display: flex;
+                 align-items: baseline; justify-content: space-between; gap: 10px; }
+  .ponte .diga small { color: var(--suave); font-size: 11px; }
+  .ponte .diga b { font: 700 22px/1 ui-monospace, Menlo, Consolas, monospace; color: var(--nosso); }
+  .digitar { display: flex; gap: 6px; }
+  .digitar input { flex: 1; min-width: 0; font: 600 16px/1.2 ui-monospace, Menlo, Consolas, monospace;
+                   color: var(--texto); background: var(--fundo); border: 1px solid var(--borda);
+                   border-radius: 8px; padding: 9px 10px; }
+  .digitar input:focus { outline: 2px solid var(--nosso); outline-offset: -2px; }
+  .digitar input:disabled { opacity: .5; }
   .aviso { font-size: 12px; color: var(--suave); }
   .erro { color: var(--perigo); font-size: 13px; margin-top: 8px; }
 </style>
@@ -167,8 +178,17 @@
         <label>Nosso bot joga de <select id="j-lado"><option value="pretas">pretas (você é brancas)</option><option value="brancas">brancas (você é pretas)</option></select></label>
         <label class="largo">Atraso humano do bot <select id="j-atraso"></select></label>
         <div class="botoes"><button id="j-nova" class="principal">Nova partida</button><button id="j-desistir">Desistir</button></div>
-        <p class="aviso" style="grid-column:1/-1;margin:2px 0 0">Clique numa peça e depois na casa. Do seu lado pode jogar você
-          <b>ou o bot de outra máquina</b>: ele fala o lance e você mexe aqui.</p>
+        <div class="ponte">
+          <div class="diga"><small>o bot jogou<br>(repita na outra tela)</small><b id="j-ultimo">–</b></div>
+          <label>Lance do adversário
+            <span class="digitar">
+              <input id="j-uci" placeholder="e2e4, Cf3 ou Nf3" autocomplete="off" spellcheck="false" maxlength="10" disabled>
+              <button id="j-enviar" disabled>Jogar</button>
+            </span>
+          </label>
+          <p class="aviso" style="margin:0">Digite o lance <b>ou</b> clique na peça e depois na casa. Do seu lado pode jogar
+            você <b>ou o bot de outra máquina</b>: ele fala o lance e você digita aqui.</p>
+        </div>
       </div>
       <div id="form-assistir" class="controles escondido">
         <label class="largo">Adversário <select id="a-oponente"></select></label>
@@ -296,6 +316,24 @@ async function jogar(uci) {
   enviando = false;
 }
 
+// O lance do bot em destaque: é o que você repete na outra tela (Lichess, tabuleiro físico).
+function desenharPonte() {
+  const l = estado.lances, ultimo = l.length ? l[l.length - 1] : null;
+  const doBot = ultimo && ultimo.cor === estado.nosso_lado && estado.modo === "jogar";
+  $("j-ultimo").textContent = doBot ? `${ultimo.uci}  (${ultimo.san})` : "–";
+  const podeJogar = vezDoHumano() && !enviando;
+  $("j-uci").disabled = !podeJogar;
+  $("j-enviar").disabled = !podeJogar;
+}
+
+async function jogarDigitado() {
+  const campo = $("j-uci"), texto = campo.value.trim();
+  if (!texto || campo.disabled) return;
+  await jogar(texto);
+  if (!$("erro").textContent) campo.value = "";    // deu certo: limpa para o próximo lance
+  campo.focus();
+}
+
 function mmss(s) {
   s = Math.max(0, s);
   const m = Math.floor(s / 60), r = s - m * 60;
@@ -327,7 +365,9 @@ function atualizarRelogios() {   // 10 vezes por segundo: só texto e classes, n
     const t = restante(cor);
     el.classList.toggle("ativo", !!(estado.rodando && estado.pensando === cor));
     el.classList.toggle("critico", t !== null && t < 10);
-    el.querySelector(".tempo").textContent = t === null ? "–:––" : mmss(t);
+    // partida rodando sem relógio nenhum = modo sem limite de tempo
+    el.querySelector(".tempo").textContent =
+      t !== null ? mmss(t) : (estado.rodando && !estado.relogios ? "∞" : "–:––");
   }
 }
 
@@ -444,6 +484,7 @@ function desenhar() {
   montarRelogio("relogio-cima", oposto(corDeBaixo()));
   montarRelogio("relogio-baixo", corDeBaixo());
   desenharTabuleiro(); desenharBarra(); desenharPensamento(); desenharLances(); desenharGrafico(); desenharResultado();
+  desenharPonte();
   atualizarRelogios();
   const chip = $("chip");
   chip.className = "chip" + (estado.rodando ? " ao-vivo" : "");
@@ -479,7 +520,9 @@ function mostrarAba(nova) {
 
 async function iniciar() {
   const op = await (await fetch("/opcoes")).json();
-  for (const r of op.relogios_jogar) $("j-relogio").add(new Option(r === "15+10" ? "15+10 (torneio)" : r, r));
+  const ROTULO_RELOGIO = { "15+10": "15+10 (torneio)",
+                           ilimitado: "Sem limite de tempo (bot pensa ~7 s; ninguém perde por tempo)" };
+  for (const r of op.relogios_jogar) $("j-relogio").add(new Option(ROTULO_RELOGIO[r] || r, r));
   $("j-relogio").value = "5+3";
   for (const a of op.atrasos_jogar) $("j-atraso").add(new Option(a === 0 ? "0 s (o bot joga direto na tela)" : `${a} s (simula a mesa)`, a));
   for (const [k, v] of Object.entries(op.oponentes)) $("a-oponente").add(new Option(v, k));
@@ -489,6 +532,8 @@ async function iniciar() {
   $("aba-assistir").onclick = () => mostrarAba("assistir");
   $("j-nova").onclick = () => enviar("/nova", { modo: "jogar", relogio: $("j-relogio").value, lado: $("j-lado").value, atraso: +$("j-atraso").value });
   $("j-desistir").onclick = () => { if (confirm("Desistir desta partida?")) enviar("/desistir"); };
+  $("j-enviar").onclick = jogarDigitado;
+  $("j-uci").addEventListener("keydown", ev => { if (ev.key === "Enter") { ev.preventDefault(); jogarDigitado(); } });
   $("a-nova").onclick = () => enviar("/nova", { oponente: $("a-oponente").value, controle: $("a-controle").value, lado: $("a-lado").value });
   $("a-parar").onclick = () => enviar("/parar");
   $("tabuleiro").addEventListener("click", ev => { const c = ev.target.closest(".casa"); if (c) clicarCasa(c.dataset.casa); });

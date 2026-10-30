@@ -10,6 +10,7 @@ import time
 import chess
 import pytest
 
+import tempo
 from ferramentas import assistir
 from testes import torneio
 
@@ -134,7 +135,7 @@ def test_pagina_estado_e_opcoes(servidor):
     assert status == 200 and estado["rodando"] is False and estado["fen"] == chess.STARTING_FEN
     status, dados = _pedir(porta, "GET", "/opcoes")
     opcoes = json.loads(dados)
-    assert set(opcoes["oponentes"]) == {"padrao", "fraco", "fixa"} and opcoes["atraso_s"] == 12.0
+    assert set(opcoes["oponentes"]) == {"padrao", "lichess8", "fraco", "fixa"} and opcoes["atraso_s"] == 12.0
     assert _pedir(porta, "GET", "/nada")[0] == 404
 
 
@@ -418,6 +419,74 @@ def test_jogar_ponder_para_antes_do_bot_pensar(servidor):
     assert registro[:6] == ["ponder-comecou", "ponder-parou", "pensar", "ponder-comecou", "ponder-parou", "pensar"]
 
 
+def test_sem_limite_nao_tem_relogio_e_a_bandeira_nunca_cai(servidor, monkeypatch):
+    """Modo ponte: o relógio de verdade está em outro lugar, então aqui ninguém perde por tempo."""
+    # 0,2 s de relógio: em qualquer perfil normal a bandeira cairia antes de o teste acabar
+    monkeypatch.setitem(assistir.RELOGIOS_JOGAR, assistir.RELOGIO_ILIMITADO, (0.2, 0))
+    porta = servidor(_vis_jogar(["e7e5"]))
+    _pedir(porta, "POST", "/nova", {"modo": "jogar", "lado": "pretas",
+                                    "relogio": assistir.RELOGIO_ILIMITADO})
+    estado = _esperar(porta, lambda e: e["pensando"] == "brancas")
+    assert estado["relogios"] is None and estado["controle"] == "sem limite de tempo"
+    time.sleep(0.5)                                   # muito mais que o relógio: não pode acontecer nada
+    estado = json.loads(_pedir(porta, "GET", "/estado")[1])
+    assert estado["resultado"] is None and estado["rodando"] and estado["relogios"] is None
+    _pedir(porta, "POST", "/lance", {"uci": "e2e4"})  # o bot responde e segue sem relógio
+    estado = _esperar(porta, lambda e: len(e["lances"]) == 2)
+    assert estado["relogios"] is None and estado["resultado"] is None
+
+
+def test_sem_limite_o_relogio_que_vai_para_o_tempo_py_nao_anda(servidor):
+    """O tempo.py recebe sempre o mesmo restante: o bot pensa igual em todo lance, sem esvaziar."""
+    vistos = []
+
+    def escolher(board, motor, perfil, relogio, caminho_book=None, ao_pensar=None, **k):
+        vistos.append(relogio["restante_s"])
+        lance = next(iter(board.legal_moves))
+        return lance, {"book": False, "profundidade": 15, "nos": 1, "avaliacao": 0.0, "pv": [lance],
+                       "tempo_s": 0.0, "motor_caiu": False}
+
+    vis = assistir.Visualizador(abrir_bot=MotorFalso, escolher=escolher, ponder=PonderFalso)
+    porta = servidor(vis)
+    _pedir(porta, "POST", "/nova", {"modo": "jogar", "lado": "brancas",
+                                    "relogio": assistir.RELOGIO_ILIMITADO})
+    _esperar(porta, lambda e: e["pensando"] == "pretas")
+    for lance in ("e7e5", "b8c6"):
+        _pedir(porta, "POST", "/lance", {"uci": lance})
+        _esperar(porta, lambda e: e["pensando"] == "pretas")
+    assert len(vistos) >= 3 and len(set(vistos)) == 1   # o mesmo relógio em todos os lances
+    assert vistos[0] == float(assistir.RELOGIOS_JOGAR[assistir.RELOGIO_ILIMITADO][0])
+
+
+def test_modo_jogar_passa_o_modo_economia_como_o_terminal(servidor, monkeypatch):
+    """A tela tem que ser réplica do partida.py: o modo economia do tempo.py também vale aqui.
+
+    Antes desta correção o modo jogar nunca passava `economia`, então essa parte do tempo.py
+    (a modificação significativa) ficava desligada justamente na tela usada para demonstrar.
+    """
+    economias, historicos = [], []
+
+    def modo_economia_falso(historico, material):
+        historicos.append(list(historico))
+        return True                      # força o economia para provar que ele chega ao escolher
+
+    def escolher(board, motor, perfil, relogio, caminho_book=None, economia=False, ao_pensar=None, **k):
+        economias.append(economia)
+        lance = next(iter(board.legal_moves))
+        return lance, {"book": False, "profundidade": 15, "nos": 1, "avaliacao": 0.75, "pv": [lance],
+                       "tempo_s": 0.0, "motor_caiu": False}
+
+    monkeypatch.setattr(tempo, "modo_economia", modo_economia_falso)
+    porta = servidor(assistir.Visualizador(abrir_bot=MotorFalso, escolher=escolher, ponder=PonderFalso))
+    _pedir(porta, "POST", "/nova", {"modo": "jogar", "lado": "brancas", "relogio": "15+10"})
+    _esperar(porta, lambda e: e["pensando"] == "pretas")
+    _pedir(porta, "POST", "/lance", {"uci": "e7e5"})
+    _esperar(porta, lambda e: len(e["lances"]) >= 3)
+    assert economias[:2] == [True, True]          # o tempo.py foi consultado e a resposta foi usada
+    # e ele recebe o histórico de avaliações crescendo, como no partida.py (0.75 peões -> 75 cp)
+    assert historicos[0] == [] and historicos[1] == [75]
+
+
 def test_jogar_parametros_invalidos(servidor):
     porta = servidor(_vis_jogar([]))
     for ruim in ({"relogio": "99+99"}, {"lado": "verde"}, {"atraso": 7}, {"atraso": "abc"}):
@@ -433,6 +502,36 @@ def test_promocao_precisa_da_peca_e_e_aceita_com_ela():
     assert vis.fila_humano.get_nowait() == ("lance", chess.Move.from_uci("e7e8n"))
     with pytest.raises(ValueError, match="sua vez"):
         vis.lance_humano("a1a2")                 # um lance por vez
+
+
+def test_lance_digitado_aceita_uci_san_e_portugues():
+    """A pessoa copia o lance da outra tela sem traduzir: e2e4, e4, Nf3 ou Cf3 valem o mesmo."""
+    board = chess.Board()
+    for texto, esperado in [("e2e4", "e2e4"), ("e4", "e2e4"), ("  E2E4 ", "e2e4"),
+                            ("Nf3", "g1f3"), ("Cf3", "g1f3"), ("g1f3", "g1f3")]:
+        assert assistir.interpretar_lance(board, texto).uci() == esperado, texto
+    roque = chess.Board("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1")
+    for texto in ("O-O", "o-o", "0-0"):
+        assert assistir.interpretar_lance(roque, texto).uci() == "e1g1", texto
+    assert assistir.interpretar_lance(roque, "0-0-0").uci() == "e1c1"
+    assert assistir.interpretar_lance(roque, "Td1").uci() == "a1d1"        # torre em português
+
+
+def test_lance_digitado_recusa_o_que_nao_da_para_entender():
+    board = chess.Board()
+    for ruim, pedaco in [("", "digite"), ("xyz", "não entendi"), ("e9e9", "não entendi"),
+                         ("e7e5", "ilegal"), ("Nf6", "não entendi")]:
+        with pytest.raises(ValueError, match=pedaco):
+            assistir.interpretar_lance(board, ruim)
+
+
+def test_lance_digitado_recusa_o_r_ambiguo_em_vez_de_adivinhar():
+    """Rf1 é torre em inglês e rei em português. Jogar o errado estragaria a partida."""
+    board = chess.Board("4k3/8/8/8/8/8/8/4K2R w K - 0 1")
+    with pytest.raises(ValueError, match="ambíguo"):
+        assistir.interpretar_lance(board, "Rf1")                           # h1f1 (torre) ou e1f1 (rei)
+    assert assistir.interpretar_lance(board, "e1f1").uci() == "e1f1"       # UCI resolve
+    assert assistir.interpretar_lance(board, "Rh2").uci() == "h1h2"        # só a torre pode: sem ambiguidade
 
 
 def test_parar_no_modo_jogar_acorda_e_encerra(servidor):
@@ -460,3 +559,57 @@ def test_jogar_contra_o_stockfish_de_verdade(servidor, monkeypatch):
     board.push_uci("e2e4")
     assert resposta in board.legal_moves
     _pedir(porta, "POST", "/parar", {})
+
+
+# ---- correções da revisão do modo jogar ----
+
+def test_pedido_com_tipo_errado_da_400_e_nao_derruba(servidor):
+    porta = servidor(_vis_jogar([]))
+    assert _pedir(porta, "POST", "/nova", {"modo": "jogar", "relogio": ["5+3"]})[0] == 400
+    assert _pedir(porta, "POST", "/nova", {"oponente": [1]})[0] == 400
+    assert _pedir(porta, "GET", "/estado")[0] == 200          # o servidor continua de pé
+
+
+def test_motor_que_caiu_e_fechado_antes_de_abrir_outro(servidor):
+    abertos = []
+
+    def abrir():
+        abertos.append(MotorFalso())
+        return abertos[-1]
+
+    def escolher(board, motor, perfil, relogio, caminho_book=None, ao_pensar=None, **k):
+        lance = chess.Move.from_uci("e2e4")
+        return lance, {"book": False, "profundidade": 10, "nos": 1, "avaliacao": 0.1, "pv": [lance],
+                       "tempo_s": 0.0, "motor_caiu": True}
+    PonderFalso.registro = []
+    porta = servidor(assistir.Visualizador(abrir_bot=abrir, escolher=escolher, ponder=PonderFalso))
+    _pedir(porta, "POST", "/nova", {"modo": "jogar", "lado": "brancas", "relogio": "5+3"})
+    _esperar(porta, lambda e: len(e["lances"]) == 1)
+    assert len(abertos) == 2 and abertos[0].fechado is True   # o motor antigo foi fechado
+
+
+def test_parar_o_ponder_nao_conta_no_relogio_do_humano(servidor):
+    class PonderLento(PonderFalso):
+        def parar(self):
+            time.sleep(0.6)            # o bot demora para parar de pensar
+            return True
+    PonderFalso.registro = []
+    porta = servidor(assistir.Visualizador(abrir_bot=MotorFalso, escolher=_escolher_falso(["e7e5"]), ponder=PonderLento))
+    _pedir(porta, "POST", "/nova", {"modo": "jogar", "lado": "pretas", "relogio": "5+3"})
+    _esperar(porta, lambda e: e["pensando"] == "brancas")
+    _pedir(porta, "POST", "/lance", {"uci": "e2e4"})
+    estado = _esperar(porta, lambda e: len(e["lances"]) == 2)
+    # 300 - (o que o humano demorou, bem menos de 0,6 s) + 3 de incremento
+    assert estado["relogios"]["brancas"] > 302.5
+
+
+def test_lance_do_bot_sem_analise_nao_entra_no_grafico(servidor):
+    def escolher_book(board, motor, perfil, relogio, caminho_book=None, ao_pensar=None, **k):
+        lance = chess.Move.from_uci("e2e4")
+        return lance, {"book": True, "profundidade": 0, "nos": 0, "avaliacao": 0.0, "pv": [lance],
+                       "tempo_s": 0.0, "motor_caiu": False}
+    PonderFalso.registro = []
+    porta = servidor(assistir.Visualizador(abrir_bot=MotorFalso, escolher=escolher_book, ponder=PonderFalso))
+    _pedir(porta, "POST", "/nova", {"modo": "jogar", "lado": "brancas", "relogio": "5+3"})
+    estado = _esperar(porta, lambda e: len(e["lances"]) == 1)
+    assert estado["avaliacoes"] == []
