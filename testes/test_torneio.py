@@ -309,3 +309,10 @@ def test_medir_estouro_funciona_e_devolve_numeros_plausiveis():
     assert len(r["abrir_s"]) == 5 and all(x > 0 for x in r["abrir_s"])
     assert r["pior_estouro_ms"] < 2000
     assert any("folga do watchdog" in linha for linha in saida)
+
+
+def test_simulador_usa_1_thread_por_padrao_e_aceita_mais():
+    t = _tarefas()[0]
+    assert (t["threads"], t["hash_mb"]) == (1, 16)
+    t = torneio.montar_tarefas("nossa", "padrao", 2, "15+10", 6.0, 0.2, None, {}, 1, 300, threads=8, hash_mb=256)[0]
+    assert (t["threads"], t["hash_mb"]) == (8, 256)
