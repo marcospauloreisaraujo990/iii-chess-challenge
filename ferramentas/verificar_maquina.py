@@ -117,9 +117,11 @@ def verificar(rapido=False, saida=print, pausa_s=3.0):
         return r, None
     try:
         motor = partida.abrir_motor(caminho, 1, 16)
-        nome = motor.id.get("name", "?")
-        lance = motor.play(chess.Board(), chess.engine.Limit(time=0.2)).move
-        motor.quit()
+        try:
+            nome = motor.id.get("name", "?")
+            lance = motor.play(chess.Board(), chess.engine.Limit(time=0.2)).move
+        finally:
+            motor.quit()   # nunca deixar um Stockfish aberto para trás
         r.ok(f"{nome} respondendo ({os.path.basename(caminho)}), primeiro lance {lance.uci()}")
     except Exception as erro:
         r.falha(f"o Stockfish não abriu: {type(erro).__name__}: {erro}")

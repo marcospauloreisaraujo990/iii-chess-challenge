@@ -255,7 +255,10 @@ class Ponder:
     aqui é engolida com um aviso: o ponder nunca pode derrubar a partida.
     """
 
-    def __init__(self, motor, board):
+    def __init__(self, motor, board, espera_parar_s=1.0):
+        # Um Stockfish saudável para em milissegundos; 1 s de espera já é muito. Se passar disso,
+        # o motor provavelmente travou, e quem chama deve reiniciá-lo (parar() devolve False).
+        self.espera_parar_s = espera_parar_s
         self.analise = None
         self.fio = None
         try:
@@ -276,17 +279,21 @@ class Ponder:
             pass
 
     def parar(self):
+        """Para a análise de fundo. Devolve True se parou (ou não havia nada), False se o motor travou."""
         if self.analise is None:
-            return
+            return True
         try:
             self.analise.stop()
         except Exception:
             pass
+        parou = True
         if self.fio is not None:
-            self.fio.join(timeout=5)
+            self.fio.join(timeout=self.espera_parar_s)
             if self.fio.is_alive():
-                print("[ponder] o motor demorou para parar; se ele travou, será reiniciado.", file=sys.stderr)
+                parou = False
+                print("[ponder] o motor não parou a tempo: vai ser reiniciado.", file=sys.stderr)
         self.analise = None
+        return parou
 
 
 def _avaliacao_para_log(score):
@@ -565,9 +572,17 @@ def _ram_total_mb():
         return None
 
 
+def _threads_da_maquina():
+    """Threads que este processo pode usar (respeita a afinidade de CPU, quando o sistema informa)."""
+    try:
+        return len(os.sched_getaffinity(0))
+    except (AttributeError, OSError):
+        return os.cpu_count() or 1
+
+
 def threads_automaticas():
     """Todas as threads da CPU menos uma (fica para o sistema e para o nosso programa)."""
-    return max(1, (os.cpu_count() or 2) - 1)
+    return max(1, _threads_da_maquina() - 1)
 
 
 def hash_automatico_mb():
@@ -582,9 +597,25 @@ def configuracao_do_motor():
     """(threads, hash_mb, de_onde_veio). CAPABLANCA_THREADS/CAPABLANCA_HASH_MB mandam; sem elas, automático."""
     threads = _numero_do_ambiente("CAPABLANCA_THREADS")
     hash_mb = _numero_do_ambiente("CAPABLANCA_HASH_MB")
-    origem = "definido no ambiente" if (threads or hash_mb) else "automático pelo hardware"
-    threads = int(threads) if threads and threads >= 1 else threads_automaticas()
-    hash_mb = int(hash_mb) if hash_mb and hash_mb >= 1 else hash_automatico_mb()
+    threads_do_ambiente = bool(threads and threads >= 1)
+    hash_do_ambiente = bool(hash_mb and hash_mb >= 1)
+    threads = int(threads) if threads_do_ambiente else threads_automaticas()
+    hash_mb = int(hash_mb) if hash_do_ambiente else hash_automatico_mb()
+
+    # Teto pela máquina: um valor digitado errado não pode travar o PC antes da partida.
+    maximo_threads = _threads_da_maquina()
+    if threads > maximo_threads:
+        print(f"[config] CAPABLANCA_THREADS={threads} passa das {maximo_threads} threads da máquina: "
+              f"usando {maximo_threads}.", file=sys.stderr)
+        threads = maximo_threads
+    ram = _ram_total_mb()
+    if ram is not None and hash_mb > ram * 3 // 4:
+        print(f"[config] CAPABLANCA_HASH_MB={hash_mb} passa de 3/4 da RAM ({ram} MB): "
+              f"usando {ram * 3 // 4} MB.", file=sys.stderr)
+        hash_mb = ram * 3 // 4
+
+    origem = (f"threads {'do ambiente' if threads_do_ambiente else 'automáticas'}, "
+              f"hash {'do ambiente' if hash_do_ambiente else 'automático'}")
     return threads, hash_mb, origem
 
 
@@ -820,17 +851,22 @@ def jogar_partida(minha_cor, chave_perfil, relogio, motor, entrada=input, saida=
                     else:
                         # --- vez do adversário ---
                         pensador = Ponder(motor, board) if (ponder and motor is not None) else None
+                        motor_travou = False
                         try:
                             lance = ler_lance(board, ao_sincronizar, entrada, saida)
+                            chegou = agora()   # o nosso relógio corre a partir daqui (inclui parar o ponder)
                         finally:
                             if pensador is not None:
-                                pensador.parar()
+                                motor_travou = not pensador.parar()
+                        if motor_travou:
+                            saida("O motor não parou de pensar no tempo do adversário. Reiniciando.")
+                            motor = _reiniciar_motor(motor, reabrir_motor, saida)
                         if lance is None:
                             esperando_go = board.turn == minha_cor
                         else:
                             board.push(lance)
                             esperando_go = False
-                            inicio_da_vez = agora()  # agora o nosso relógio corre
+                            inicio_da_vez = chegou
                     salvar_pgn(board, caminho_pgn, cabecalhos)
                     erros_seguidos = 0
                 except EOFError:

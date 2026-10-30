@@ -552,12 +552,14 @@ def test_ctrl_c_durante_a_busca_usa_o_melhor_lance_visto(monkeypatch):
 # ====================== threads e hash configuráveis ======================
 
 def test_threads_automaticas_deixam_uma_livre(monkeypatch):
-    monkeypatch.setattr(partida.os, "cpu_count", lambda: 16)
+    monkeypatch.setattr(partida, "_threads_da_maquina", lambda: 16)
     assert partida.threads_automaticas() == 15          # PC do torneio: 8 núcleos / 16 threads
-    monkeypatch.setattr(partida.os, "cpu_count", lambda: 1)
+    monkeypatch.setattr(partida, "_threads_da_maquina", lambda: 1)
     assert partida.threads_automaticas() == 1
-    monkeypatch.setattr(partida.os, "cpu_count", lambda: None)
-    assert partida.threads_automaticas() == 1
+
+
+def test_threads_da_maquina_le_um_numero_valido():
+    assert partida._threads_da_maquina() >= 1
 
 
 def test_hash_automatico_e_um_oitavo_da_ram_com_teto(monkeypatch):
@@ -579,10 +581,39 @@ def test_ram_desta_maquina_e_lida():
     assert ram is None or ram > 256
 
 
+def _pc_do_torneio(monkeypatch):
+    monkeypatch.setattr(partida, "_threads_da_maquina", lambda: 16)
+    monkeypatch.setattr(partida, "_ram_total_mb", lambda: 16 * 1024)
+
+
 def test_variaveis_de_ambiente_mandam(monkeypatch):
+    _pc_do_torneio(monkeypatch)
     monkeypatch.setenv("CAPABLANCA_THREADS", "14")
     monkeypatch.setenv("CAPABLANCA_HASH_MB", "1024")
-    assert partida.configuracao_do_motor() == (14, 1024, "definido no ambiente")
+    assert partida.configuracao_do_motor() == (14, 1024, "threads do ambiente, hash do ambiente")
+
+
+def test_origem_mostra_cada_valor_separado(monkeypatch):
+    _pc_do_torneio(monkeypatch)
+    monkeypatch.setenv("CAPABLANCA_THREADS", "8")
+    monkeypatch.delenv("CAPABLANCA_HASH_MB", raising=False)
+    assert partida.configuracao_do_motor() == (8, 2048, "threads do ambiente, hash automático")
+
+
+def test_threads_acima_da_maquina_sao_limitadas(monkeypatch, capsys):
+    _pc_do_torneio(monkeypatch)
+    monkeypatch.setenv("CAPABLANCA_THREADS", "64")
+    monkeypatch.delenv("CAPABLANCA_HASH_MB", raising=False)
+    assert partida.configuracao_do_motor()[0] == 16
+    assert "passa das 16 threads" in capsys.readouterr().err
+
+
+def test_hash_acima_de_tres_quartos_da_ram_e_limitado(monkeypatch, capsys):
+    _pc_do_torneio(monkeypatch)
+    monkeypatch.delenv("CAPABLANCA_THREADS", raising=False)
+    monkeypatch.setenv("CAPABLANCA_HASH_MB", "999999")     # erro de digitação
+    assert partida.configuracao_do_motor()[1] == 16 * 1024 * 3 // 4
+    assert "3/4 da RAM" in capsys.readouterr().err
 
 
 def test_sem_variaveis_usa_o_automatico(monkeypatch):
@@ -590,7 +621,8 @@ def test_sem_variaveis_usa_o_automatico(monkeypatch):
     monkeypatch.delenv("CAPABLANCA_HASH_MB", raising=False)
     monkeypatch.setattr(partida, "threads_automaticas", lambda: 15)
     monkeypatch.setattr(partida, "hash_automatico_mb", lambda: 2048)
-    assert partida.configuracao_do_motor() == (15, 2048, "automático pelo hardware")
+    _pc_do_torneio(monkeypatch)
+    assert partida.configuracao_do_motor() == (15, 2048, "threads automáticas, hash automático")
 
 
 @pytest.mark.parametrize("ruim", ["abc", "0", "-3", "nan"])
@@ -668,8 +700,8 @@ class _MotorPonderFalso:
 def test_ponder_comeca_e_para():
     registro = []
     pensador = partida.Ponder(_MotorPonderFalso(registro), chess.Board())
-    pensador.parar()
-    pensador.parar()                       # parar duas vezes não quebra
+    assert pensador.parar() is True
+    assert pensador.parar() is True        # parar duas vezes não quebra
     assert registro == ["ponder-comecou", "ponder-parou"]
     assert not pensador.fio.is_alive() if pensador.fio else True
 
@@ -710,3 +742,48 @@ def test_ponder_real_para_e_o_motor_continua_usavel():
         assert lance in board.legal_moves and info["motor_caiu"] is False
     finally:
         motor.quit()
+
+
+
+class _AnaliseQueNaoPara:
+    """Simula um motor travado: stop() não faz a análise terminar."""
+
+    def __init__(self):
+        import threading
+        self.liberar = threading.Event()
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        self.liberar.wait(timeout=10)
+        raise StopIteration
+
+    def stop(self):
+        pass
+
+
+def test_ponder_com_motor_travado_devolve_false_rapido(capsys):
+    analise = _AnaliseQueNaoPara()
+
+    class Motor:
+        def analysis(self, board, info=None):
+            return analise
+    pensador = partida.Ponder(Motor(), chess.Board(), espera_parar_s=0.2)
+    inicio = time.monotonic()
+    assert pensador.parar() is False
+    assert time.monotonic() - inicio < 1.0
+    assert "vai ser reiniciado" in capsys.readouterr().err
+    analise.liberar.set()
+
+
+def test_ponder_com_stop_que_levanta_erro_nao_derruba():
+    class Analise(_AnaliseQueNaoPara):
+        def stop(self):
+            self.liberar.set()
+            raise chess.engine.EngineTerminatedError("morreu")
+
+    class Motor:
+        def analysis(self, board, info=None):
+            return Analise()
+    assert partida.Ponder(Motor(), chess.Board()).parar() is True
