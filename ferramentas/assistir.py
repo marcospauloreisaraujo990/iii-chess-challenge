@@ -20,6 +20,7 @@ import json
 import os
 import queue
 import random
+import re
 import sys
 import threading
 import time
@@ -56,6 +57,13 @@ LADOS = ("brancas", "pretas")
 RELOGIOS_JOGAR = {"3+2": (180, 2), "5+3": (300, 3), "10+5": (600, 5), "15+10": (900, 10), "25+0": (1500, 0)}
 ATRASOS_JOGAR = (0, 6, 12)   # atraso humano simulado do nosso bot; na tela não há mesa, então o padrão é 0
 NOME_HUMANO = "Você (ou o bot da outra máquina)"
+
+# Letras das peças em português -> inglês, para aceitar o lance como ele aparece numa tela em
+# português (Lichess, Chess.com). "B" é bispo nas duas línguas. O "R" é ambíguo (Rei em português,
+# Rook/torre em inglês), então o texto é tentado primeiro SEM tradução: "Rd1" vale torre, como no
+# padrão internacional.
+LETRAS_PT = {"D": "Q", "C": "N", "T": "R", "R": "K"}
+_ROQUE = re.compile(r"^[0oO]-[0oO](-[0oO])?$")
 TEMPO_FIXO_REAL_S = 10.0   # só para o oponente "fixa": referência de teste, não vale para a mesa
 TAMANHO_MAXIMO_PEDIDO = 4096   # bytes: os pedidos da página são minúsculos
 # Proteções do navegador: a página não pode ser embutida em outro site nem carregar nada de fora.
@@ -65,6 +73,45 @@ CABECALHOS_SEGURANCA = {
     "Content-Security-Policy": ("default-src 'self'; style-src 'self' 'unsafe-inline'; "
                                 "script-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'"),
 }
+
+
+def interpretar_lance(board, texto):
+    """Texto digitado -> chess.Move legal nesta posição. ValueError com explicação se não der.
+
+    Aceita as três formas que aparecem nas telas de xadrez, para a pessoa poder copiar o lance
+    do outro programa sem traduzir nada:
+        UCI  : e2e4, e1g1 (roque), e7e8q (promoção)   <- o formato da mesa do torneio
+        SAN  : e4, Nf3, exd5, O-O, e8=Q
+        SAN em português: Cf3, Txd5, Dh5, O-O
+    """
+    texto = str(texto).strip()
+    if not texto:
+        raise ValueError("digite um lance (exemplo: e2e4)")
+    if _ROQUE.match(texto):
+        texto = texto.upper().replace("0", "O")
+    try:
+        lance = chess.Move.from_uci(texto.lower())
+    except ValueError:
+        pass                      # não é UCI; tentamos SAN abaixo
+    else:
+        if lance in board.legal_moves:
+            return lance
+        raise ValueError(f"lance ilegal nesta posição: {texto}")
+    traduzido = LETRAS_PT.get(texto[0], texto[0]) + texto[1:]
+    lances = []
+    for versao in (texto, traduzido):
+        try:
+            lances.append(board.parse_san(versao))   # parse_san só devolve lance legal
+        except ValueError:
+            pass
+    if not lances:
+        raise ValueError(f"não entendi o lance: {texto} (use e2e4, Cf3 ou Nf3)")
+    if len(lances) == 2 and lances[0] != lances[1]:
+        # Só acontece com "R": Rd1 é torre em inglês e rei em português, e as duas são legais.
+        # Em vez de adivinhar e jogar o lance errado, pedimos o formato sem ambiguidade.
+        raise ValueError(f"{texto} é ambíguo (torre em inglês, rei em português): "
+                         f"escreva em UCI, {lances[0].uci()} ou {lances[1].uci()}")
+    return lances[0]
 
 
 def _aval_brancas(avaliacao, vez):
@@ -339,17 +386,12 @@ class Visualizador:
             self.fio.start()
 
     def lance_humano(self, uci):
-        """Recebe o lance do lado humano. Erro (ValueError) se não for a vez dele ou se for ilegal."""
+        """Recebe o lance do lado humano (UCI ou SAN). Erro (ValueError) se não for a vez dele ou se for ilegal."""
         with self.trava_lance:
             board = self.tabuleiro_humano
             if board is None:
                 raise ValueError("não é a sua vez")
-            try:
-                lance = chess.Move.from_uci(str(uci))
-            except ValueError:
-                raise ValueError(f"lance inválido: {uci!r}")
-            if lance not in board.legal_moves:
-                raise ValueError(f"lance ilegal nesta posição: {uci}")
+            lance = interpretar_lance(board, uci)
             self.tabuleiro_humano = None   # um lance por vez
             self.fila_humano.put(("lance", lance))
 

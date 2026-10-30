@@ -435,6 +435,36 @@ def test_promocao_precisa_da_peca_e_e_aceita_com_ela():
         vis.lance_humano("a1a2")                 # um lance por vez
 
 
+def test_lance_digitado_aceita_uci_san_e_portugues():
+    """A pessoa copia o lance da outra tela sem traduzir: e2e4, e4, Nf3 ou Cf3 valem o mesmo."""
+    board = chess.Board()
+    for texto, esperado in [("e2e4", "e2e4"), ("e4", "e2e4"), ("  E2E4 ", "e2e4"),
+                            ("Nf3", "g1f3"), ("Cf3", "g1f3"), ("g1f3", "g1f3")]:
+        assert assistir.interpretar_lance(board, texto).uci() == esperado, texto
+    roque = chess.Board("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1")
+    for texto in ("O-O", "o-o", "0-0"):
+        assert assistir.interpretar_lance(roque, texto).uci() == "e1g1", texto
+    assert assistir.interpretar_lance(roque, "0-0-0").uci() == "e1c1"
+    assert assistir.interpretar_lance(roque, "Td1").uci() == "a1d1"        # torre em português
+
+
+def test_lance_digitado_recusa_o_que_nao_da_para_entender():
+    board = chess.Board()
+    for ruim, pedaco in [("", "digite"), ("xyz", "não entendi"), ("e9e9", "não entendi"),
+                         ("e7e5", "ilegal"), ("Nf6", "não entendi")]:
+        with pytest.raises(ValueError, match=pedaco):
+            assistir.interpretar_lance(board, ruim)
+
+
+def test_lance_digitado_recusa_o_r_ambiguo_em_vez_de_adivinhar():
+    """Rf1 é torre em inglês e rei em português. Jogar o errado estragaria a partida."""
+    board = chess.Board("4k3/8/8/8/8/8/8/4K2R w K - 0 1")
+    with pytest.raises(ValueError, match="ambíguo"):
+        assistir.interpretar_lance(board, "Rf1")                           # h1f1 (torre) ou e1f1 (rei)
+    assert assistir.interpretar_lance(board, "e1f1").uci() == "e1f1"       # UCI resolve
+    assert assistir.interpretar_lance(board, "Rh2").uci() == "h1h2"        # só a torre pode: sem ambiguidade
+
+
 def test_parar_no_modo_jogar_acorda_e_encerra(servidor):
     porta = servidor(_vis_jogar([]))
     _pedir(porta, "POST", "/nova", {"modo": "jogar", "lado": "pretas", "relogio": "15+10"})
