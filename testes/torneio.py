@@ -67,8 +67,10 @@ NIVEL_FRACO = 3
 
 # Emulação do "nível 8" do Lichess, o mais forte dos 8 níveis de jogar contra o computador.
 # Não é o Stockfish solto: é a avaliação em força máxima (Skill Level 20, que é o padrão) com a
-# BUSCA ALGEMADA em profundidade 22 e cerca de 1 s por lance. É o que o Lichess usa no fishnet,
-# o programa que joga os níveis 1 a 8 (ver as fontes no README).
+# BUSCA ALGEMADA em profundidade 22 e cerca de 1 s por lance.
+# Valores conferidos no código-fonte do fishnet (o programa que o Lichess usa para jogar esses
+# níveis), em "impl SkillLevel" de src/api.rs: para o nível 8, skill_level()=20, depth()=22 e
+# time()=1000 ms. Nenhuma linha de código deles foi copiada: só os dois limites.
 # Serve de RÉGUA na arguição: é um adversário externo que qualquer um conhece e pode conferir,
 # em vez de uma versão nossa comparada com ela mesma.
 LICHESS8_PROFUNDIDADE = 22

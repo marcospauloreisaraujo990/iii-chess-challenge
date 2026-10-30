@@ -195,9 +195,12 @@ que sobrou. O `--atraso-s` é obrigatório: não existe valor padrão.
 ### Régua externa: o "nível 8" do Lichess
 A versão `lichess8` emula o mais forte dos 8 níveis do *jogar contra o computador* do Lichess: avaliação em
 força máxima (Skill Level 20, que é o padrão) com a **busca algemada em profundidade 22 e ~1 s por lance**.
-Esses são os valores que o Lichess passa ao Stockfish no **fishnet**, o programa que joga esses níveis
-([discussão com o rastreamento do código](https://talkchess.com/viewtopic.php?p=899498),
-[fórum do Lichess](https://lichess.org/forum/general-chess-discussion/what-rating-is-the-practice-with-computer)).
+Esses são os valores que o Lichess passa ao Stockfish no **fishnet**, o programa que joga esses níveis.
+Conferidos no código-fonte dele, em `impl SkillLevel` de
+[`fishnet/src/api.rs`](https://github.com/lichess-org/fishnet/blob/master/src/api.rs), que para o nível 8
+devolve `skill_level() = 20`, `depth() = 22` e `time() = 1000 ms`. **Nenhuma linha de código do Lichess foi
+copiada**: a classe `JogadorLichess8` é nossa (5 linhas) e só passa esses dois limites ao mesmo Stockfish que
+o projeto já usa.
 
 Serve para responder, com placar, "o nosso bot é forte?" usando um adversário que qualquer um conhece e pode
 conferir, em vez de comparar o nosso código com ele mesmo. **O nosso bot não é limitado assim**: roda Skill
