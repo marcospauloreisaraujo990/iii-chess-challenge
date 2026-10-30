@@ -142,6 +142,23 @@ Pasta `partidas/` (fora do Git): `AAAA-MM-DD_HH-MM-SS.txt` (log, uma linha por l
 número, cor, lance UCI, profundidade, nós, avaliação, PV, tempo gasto; lance de book entra com profundidade 0 e
 a palavra `book`) e `.pgn` (a partida inteira, salvo a cada lance).
 
+## Assistir o bot jogando (visualizador no navegador)
+```
+python ferramentas/assistir.py
+```
+Abre `http://127.0.0.1:8765` no navegador. Escolha o adversário (Stockfish com a gestão de tempo dele,
+bot fraco simulando um bot de aluno, ou tempo fixo), o relógio (rápido 3+2, que é o 15+10 em escala 0,2,
+ou o 15+10 real) e de que cor o nosso bot joga, e clique em **Nova partida**. A tela mostra o tabuleiro, os
+dois relógios correndo, a barra de avaliação, **o que o nosso bot está pensando** (profundidade, posições,
+avaliação e a linha principal), a lista de lances e o gráfico da avaliação.
+
+- É uma ferramenta de **teste e apresentação** (boa para a arguição). Nas partidas oficiais o programa da
+  mesa é o `partida.py`, no terminal.
+- Roda **sem internet**: o servidor só escuta no próprio computador (127.0.0.1) e a página não carrega nada
+  de fora. Pedidos vindos de outro endereço são recusados.
+- A partida é jogada pelo mesmo simulador dos confrontos: o nosso lado é o programa de verdade (com o
+  `tempo.py`), com atraso humano simulado de 12 s por lance (`--atraso-s` muda).
+
 ## Regras do torneio e onde o código as garante
 | Regra | Onde |
 |---|---|

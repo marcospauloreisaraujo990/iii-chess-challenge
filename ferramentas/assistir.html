@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Capablanca ao vivo</title>
+<style>
+  :root {
+    --fundo: #f4f1ea; --painel: #ffffff; --borda: #e3ded3; --texto: #1f1d1a; --suave: #6f6a60;
+    --casa-clara: #ece3cf; --casa-escura: #9c7b55; --destaque: rgba(214, 170, 40, .55);
+    --nosso: #1f7a53; --deles: #8a5a2b; --perigo: #b3261e; --barra-branca: #f7f5f0; --barra-preta: #26231f;
+    --sombra: 0 1px 2px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --fundo: #14130f; --painel: #1d1b17; --borda: #2f2c26; --texto: #ece7dc; --suave: #a39c8e;
+      --casa-clara: #d9ccb0; --casa-escura: #87653f; --destaque: rgba(232, 190, 60, .55);
+      --nosso: #4fc08d; --deles: #d39a5c; --perigo: #ff7b72; --barra-branca: #efebe3; --barra-preta: #0d0c0a;
+      --sombra: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --fundo: #14130f; --painel: #1d1b17; --borda: #2f2c26; --texto: #ece7dc; --suave: #a39c8e;
+    --casa-clara: #d9ccb0; --casa-escura: #87653f; --destaque: rgba(232, 190, 60, .55);
+    --nosso: #4fc08d; --deles: #d39a5c; --perigo: #ff7b72; --barra-branca: #efebe3; --barra-preta: #0d0c0a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--fundo); color: var(--texto);
+    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--borda);
+  }
+  header h1 { font-size: 18px; margin: 0; letter-spacing: .2px; }
+  header .sub { color: var(--suave); font-size: 13px; }
+  .chip { margin-left: auto; font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--borda);
+          color: var(--suave); white-space: nowrap; }
+  .chip.ao-vivo { color: var(--nosso); border-color: var(--nosso); }
+  .chip.ao-vivo::before { content: "●"; margin-right: 6px; animation: pulsar 1.2s infinite; }
+  @keyframes pulsar { 50% { opacity: .25; } }
+  main {
+    display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 20px; padding: 20px;
+    max-width: 1180px; margin: 0 auto;
+  }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 16px; } }
+
+  /* --- coluna do tabuleiro --- */
+  .tabuleiro-area { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 12px; align-content: start; }
+  .relogio-linha { grid-column: 2; display: flex; align-items: center; justify-content: space-between;
+                   background: var(--painel); border: 1px solid var(--borda); border-radius: 10px;
+                   padding: 8px 14px; box-shadow: var(--sombra); }
+  .relogio-linha .nome { font-weight: 600; display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .relogio-linha .nome span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .peao { width: 12px; height: 12px; border-radius: 50%; border: 1px solid var(--suave); flex: none; }
+  .peao.brancas { background: #f7f5f0; } .peao.pretas { background: #1f1d1a; }
+  .tag { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--nosso); color: var(--painel); }
+  .tempo { font: 600 24px/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-variant-numeric: tabular-nums;
+           padding: 4px 10px; border-radius: 6px; }
+  .relogio-linha.ativo .tempo { background: var(--texto); color: var(--painel); }
+  .relogio-linha.critico .tempo { background: var(--perigo); color: #fff; }
+  .barra { grid-row: 2; width: 30px; border-radius: 6px; overflow: hidden; background: var(--barra-preta);
+           position: relative; border: 1px solid var(--borda); }
+  .barra .branca { position: absolute; left: 0; right: 0; bottom: 0; background: var(--barra-branca);
+                   transition: height .5s ease; }
+  .barra .valor { position: absolute; left: 0; right: 0; font: 600 10px/1 ui-monospace, monospace; text-align: center;
+                  mix-blend-mode: difference; color: #fff; }
+  .tabuleiro { grid-row: 2; grid-column: 2; display: grid; grid-template-columns: repeat(8, 1fr);
+               grid-template-rows: repeat(8, 1fr);
+               aspect-ratio: 1; width: 100%; max-width: 640px; border-radius: 8px; overflow: hidden;
+               box-shadow: var(--sombra); user-select: none; }
+  .casa { position: relative; display: flex; align-items: center; justify-content: center; }
+  .casa.clara { background: var(--casa-clara); } .casa.escura { background: var(--casa-escura); }
+  .casa.ultimo::after { content: ""; position: absolute; inset: 0; background: var(--destaque); }
+  .casa .peca { position: relative; z-index: 1; font-size: clamp(22px, 6.2vw, 58px); line-height: 1;
+                font-family: "Segoe UI Symbol", "Noto Sans Symbols2", "DejaVu Sans", "Apple Symbols", serif; }
+  .peca.b { color: #fbfaf7; -webkit-text-stroke: 1.2px #2a261f;
+            text-shadow: 0 1px 1px rgba(0,0,0,.35); }
+  .peca.p { color: #1d1a16; -webkit-text-stroke: .6px #d8cdb4; text-shadow: 0 1px 1px rgba(0,0,0,.25); }
+  .coord { position: absolute; font: 600 10px/1 system-ui, sans-serif; opacity: .75; }
+  .coord.col { right: 3px; bottom: 2px; } .coord.lin { left: 3px; top: 2px; }
+  .casa.clara .coord { color: var(--casa-escura); } .casa.escura .coord { color: var(--casa-clara); }
+
+  /* --- painel lateral --- */
+  .lado { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .cartao { background: var(--painel); border: 1px solid var(--borda); border-radius: 12px; padding: 14px 16px;
+            box-shadow: var(--sombra); }
+  .cartao h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--suave);
+               margin: 0 0 10px; font-weight: 600; }
+  .controles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .controles label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--suave); }
+  .controles label.largo { grid-column: 1 / -1; }
+  select, button { font: inherit; color: var(--texto); background: var(--fundo); border: 1px solid var(--borda);
+                   border-radius: 8px; padding: 8px 10px; }
+  button { cursor: pointer; font-weight: 600; }
+  button.principal { background: var(--nosso); border-color: var(--nosso); color: var(--painel); }
+  button:disabled { opacity: .5; cursor: default; }
+  .botoes { grid-column: 1 / -1; display: flex; gap: 8px; } .botoes button { flex: 1; }
+  .numeros { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .numero { background: var(--fundo); border-radius: 8px; padding: 8px; }
+  .numero b { display: block; font: 600 18px/1.2 ui-monospace, Menlo, Consolas, monospace;
+              font-variant-numeric: tabular-nums; }
+  .numero small { color: var(--suave); font-size: 11px; }
+  .pv { margin-top: 10px; font: 13px/1.6 ui-monospace, Menlo, Consolas, monospace; color: var(--texto);
+        background: var(--fundo); border-radius: 8px; padding: 8px 10px; min-height: 42px; word-break: break-word; }
+  .pv .primeiro { color: var(--nosso); font-weight: 700; }
+  .status-pensando { font-size: 13px; color: var(--suave); margin-bottom: 8px; min-height: 19px; }
+  .lances { max-height: 220px; overflow: auto; font: 13px/1.7 ui-monospace, Menlo, Consolas, monospace;
+            display: grid; grid-template-columns: 34px 1fr 1fr; column-gap: 6px; }
+  .lances .n { color: var(--suave); } .lances .ab { color: var(--suave); font-style: italic; }
+  .lances .ult { background: var(--destaque); border-radius: 4px; padding: 0 4px; }
+  svg.grafico { width: 100%; height: 120px; display: block; }
+  .resultado { display: none; border-radius: 10px; padding: 12px 14px; font-weight: 700; text-align: center; }
+  .resultado.mostrar { display: block; }
+  .resultado.vitoria { background: color-mix(in srgb, var(--nosso) 18%, transparent); color: var(--nosso); }
+  .resultado.derrota { background: color-mix(in srgb, var(--perigo) 18%, transparent); color: var(--perigo); }
+  .resultado.empate { background: var(--fundo); color: var(--texto); }
+  .resultado small { display: block; font-weight: 500; color: var(--suave); margin-top: 2px; }
+  .aviso { font-size: 12px; color: var(--suave); }
+  .erro { color: var(--perigo); font-size: 13px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Capablanca ao vivo</h1>
+    <div class="sub">O nosso bot (Stockfish + gestão de tempo própria) contra outro bot, com relógio de verdade.</div>
+  </div>
+  <div id="chip" class="chip">parado</div>
+</header>
+
+<main>
+  <section class="tabuleiro-area" aria-label="Partida">
+    <div id="relogio-cima" class="relogio-linha"></div>
+    <div class="barra" aria-label="Avaliação"><div id="barra-branca" class="branca" style="height:50%"></div>
+      <div id="barra-valor" class="valor" style="top:50%">0.0</div></div>
+    <div id="tabuleiro" class="tabuleiro" role="img" aria-label="Tabuleiro"></div>
+    <div id="relogio-baixo" class="relogio-linha"></div>
+  </section>
+
+  <aside class="lado">
+    <div id="resultado" class="resultado" role="status"></div>
+
+    <div class="cartao">
+      <h2>O que o nosso bot está pensando</h2>
+      <div id="status-pensando" class="status-pensando">Comece uma partida.</div>
+      <div class="numeros">
+        <div class="numero"><b id="n-prof">–</b><small>profundidade</small></div>
+        <div class="numero"><b id="n-aval">–</b><small>avaliação</small></div>
+        <div class="numero"><b id="n-nos">–</b><small>posições</small></div>
+        <div class="numero"><b id="n-nps">–</b><small>por segundo</small></div>
+      </div>
+      <div id="pv" class="pv" aria-label="Linha principal">—</div>
+    </div>
+
+    <div class="cartao">
+      <h2>Nova partida</h2>
+      <div class="controles">
+        <label class="largo">Adversário <select id="oponente"></select></label>
+        <label class="largo">Relógio <select id="controle"></select></label>
+        <label>Nosso bot joga de <select id="lado"><option value="brancas">brancas</option><option value="pretas">pretas</option></select></label>
+        <label>Atraso humano simulado <span class="numero" style="padding:8px 10px"><b id="atraso" style="font-size:15px">–</b></span></label>
+        <div class="botoes"><button id="nova" class="principal">Nova partida</button><button id="parar">Parar</button></div>
+      </div>
+      <div id="erro" class="erro"></div>
+    </div>
+
+    <div class="cartao">
+      <h2>Avaliação ao longo da partida <span class="aviso">(+ = brancas melhor)</span></h2>
+      <svg id="grafico" class="grafico" viewBox="0 0 300 120" preserveAspectRatio="none" role="img"
+           aria-label="Gráfico da avaliação"></svg>
+    </div>
+
+    <div class="cartao">
+      <h2>Lances</h2>
+      <div id="lances" class="lances"></div>
+    </div>
+    <p class="aviso">Ferramenta de teste e apresentação. Nas partidas oficiais o programa da mesa é o
+      <code>partida.py</code>, no terminal. Tudo roda neste computador, sem internet.</p>
+  </aside>
+</main>
+
+<script>
+"use strict";
+const PECAS = { k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" };
+const MOTIVOS = {
+  checkmate: "xeque-mate", tempo: "tempo esgotado", "tempo-sem-material": "tempo esgotado, mas sem material para mate",
+  stalemate: "afogamento", insufficient_material: "material insuficiente", threefold_repetition: "repetição tripla",
+  fivefold_repetition: "repetição quíntupla", fifty_moves: "regra dos 50 lances", seventyfive_moves: "regra dos 75 lances",
+  "limite-de-lances": "limite de lances do simulador", "empate-vale-pretas": "empate no armageddon (vale para as pretas)",
+  "lance-ilegal": "lance ilegal", interrompida: "partida interrompida", erro: "erro"
+};
+let estado = null, desvio = 0;   // desvio = relógio do servidor - relógio do navegador (s)
+const $ = id => document.getElementById(id);
+
+function lerFen(fen) {
+  const linhas = fen.split(" ")[0].split("/"), casas = [];
+  for (const linha of linhas) {
+    const fila = [];
+    for (const c of linha) { if (/\d/.test(c)) for (let i = 0; i < +c; i++) fila.push(null); else fila.push(c); }
+    casas.push(fila);
+  }
+  return casas;   // casas[0] = 8ª fileira
+}
+
+function desenharTabuleiro() {
+  const casas = lerFen(estado.fen), virado = estado.nosso_lado === "pretas";
+  const ult = estado.ultimo ? [estado.ultimo.slice(0, 2), estado.ultimo.slice(2, 4)] : [];
+  const t = $("tabuleiro"); t.innerHTML = "";
+  t.setAttribute("aria-label", "Tabuleiro: " + estado.fen);
+  for (let i = 0; i < 8; i++) for (let j = 0; j < 8; j++) {
+    const lin = virado ? 7 - i : i, col = virado ? 7 - j : j;
+    const nome = "abcdefgh"[col] + (8 - lin), peca = casas[lin][col];
+    const d = document.createElement("div");
+    d.className = "casa " + ((lin + col) % 2 ? "escura" : "clara") + (ult.includes(nome) ? " ultimo" : "");
+    if (peca) {
+      const s = document.createElement("span");
+      s.className = "peca " + (peca === peca.toUpperCase() ? "b" : "p");
+      s.textContent = PECAS[peca.toLowerCase()];
+      d.appendChild(s);
+    }
+    if (i === 7) { const c = document.createElement("span"); c.className = "coord col"; c.textContent = "abcdefgh"[col]; d.appendChild(c); }
+    if (j === 0) { const c = document.createElement("span"); c.className = "coord lin"; c.textContent = 8 - lin; d.appendChild(c); }
+    t.appendChild(d);
+  }
+}
+
+function mmss(s) {
+  s = Math.max(0, s);
+  const m = Math.floor(s / 60), r = s - m * 60;
+  return s < 20 ? `${m}:${r.toFixed(1).padStart(4, "0")}` : `${m}:${String(Math.floor(r)).padStart(2, "0")}`;
+}
+
+function restante(cor) {
+  if (!estado || !estado.relogios) return null;
+  let t = estado.relogios[cor];
+  if (estado.pensando === cor && estado.pensando_desde) t -= (Date.now() / 1000 + desvio) - estado.pensando_desde;
+  return t;
+}
+
+function desenharRelogio(id, cor) {
+  const el = $(id), nosso = cor === estado.nosso_lado;
+  const nome = estado.nomes ? estado.nomes[cor] : (nosso ? "Capablanca (nosso)" : "Adversário");
+  const t = restante(cor);
+  el.className = "relogio-linha" + (estado.pensando === cor ? " ativo" : "") + (t !== null && t < 10 ? " critico" : "");
+  el.innerHTML = `<div class="nome"><i class="peao ${cor}"></i><span>${nome}</span>${nosso ? '<em class="tag">nosso</em>' : ""}</div>
+                  <div class="tempo">${t === null ? "–:––" : mmss(t)}</div>`;
+}
+
+function textoAval(a) {
+  if (!a) return "–";
+  if (a.mate !== null && a.mate !== undefined) return (a.mate > 0 ? "M" : "-M") + Math.abs(a.mate);
+  if (a.cp === null || a.cp === undefined) return "–";
+  return (a.cp >= 0 ? "+" : "") + (a.cp / 100).toFixed(2);
+}
+
+function fracaoBrancas(a) {
+  if (!a) return 0.5;
+  if (a.mate) return a.mate > 0 ? 1 : 0;
+  if (a.cp === null || a.cp === undefined) return 0.5;
+  return 1 / (1 + Math.pow(10, -a.cp / 400));
+}
+
+function desenharBarra() {
+  const a = estado.info ? estado.info.avaliacao : (estado.avaliacoes.length ? estado.avaliacoes.at(-1) : null);
+  const f = fracaoBrancas(a), virado = estado.nosso_lado === "pretas";
+  const branca = $("barra-branca");
+  branca.style.height = (f * 100) + "%";
+  branca.style.top = virado ? "0" : ""; branca.style.bottom = virado ? "" : "0";
+  const v = $("barra-valor"), txt = textoAval(a);
+  v.textContent = txt.startsWith("M") || txt.startsWith("-M") || txt === "–" ? txt : (+txt).toFixed(1);
+  v.style.top = virado ? `calc(${f * 100}% - 12px)` : `calc(${(1 - f) * 100}% + 2px)`;
+}
+
+function formatarNumero(n) {
+  if (n >= 1e9) return (n / 1e9).toFixed(1) + "B";
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
+  if (n >= 1e3) return (n / 1e3).toFixed(0) + "k";
+  return String(n);
+}
+
+function desenharPensamento() {
+  const info = estado.info, nossoPensando = estado.pensando === estado.nosso_lado;
+  let status = "Comece uma partida.";
+  if (estado.rodando) status = nossoPensando ? "Pensando agora…" : (estado.pensando ? "O adversário está pensando. Abaixo, a última análise do nosso bot." : "Preparando…");
+  else if (estado.resultado) status = "Partida encerrada.";
+  $("status-pensando").textContent = status;
+  $("n-prof").textContent = info ? info.profundidade : "–";
+  $("n-aval").textContent = info ? textoAval(info.avaliacao) : "–";
+  $("n-nos").textContent = info ? formatarNumero(info.nos) : "–";
+  $("n-nps").textContent = info && info.decorrido > 0 ? formatarNumero(Math.round(info.nos / info.decorrido)) : "–";
+  const pv = $("pv");
+  if (info && info.pv.length) {
+    pv.innerHTML = info.pv.map((l, i) => i === 0 ? `<span class="primeiro">${l}</span>` : l).join(" ");
+  } else pv.textContent = "—";
+}
+
+function desenharLances() {
+  const el = $("lances"), l = estado.lances, perto = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
+  let html = "", inicio = 0;
+  if (l.length && l[0].cor === "pretas") { html += `<span class="n">1.</span><span>…</span>`; }
+  for (let i = 0; i < l.length; i++) {
+    const m = l[i], ultimo = i === l.length - 1;
+    const numero = Math.floor((i + (l[0] && l[0].cor === "pretas" ? 1 : 0)) / 2) + 1;
+    if (m.cor === "brancas") html += `<span class="n">${numero}.</span>`;
+    html += `<span class="${m.abertura ? "ab" : ""}"><span class="${ultimo ? "ult" : ""}" title="${m.tempo ? m.tempo + " s" : "abertura"}">${m.san}</span></span>`;
+  }
+  el.innerHTML = html;
+  if (perto) el.scrollTop = el.scrollHeight;
+}
+
+function desenharGrafico() {
+  const svg = $("grafico"), a = estado.avaliacoes, W = 300, H = 120, LIM = 5;
+  let html = `<line x1="0" y1="${H / 2}" x2="${W}" y2="${H / 2}" stroke="currentColor" stroke-opacity=".25" stroke-dasharray="4 4"/>`;
+  if (a.length) {
+    const pts = a.map((p, i) => {
+      let v = p.mate ? (p.mate > 0 ? LIM : -LIM) : Math.max(-LIM, Math.min(LIM, (p.cp || 0) / 100));
+      const x = a.length === 1 ? W / 2 : (i / (a.length - 1)) * W, y = H / 2 - (v / LIM) * (H / 2 - 6);
+      return [x, y];
+    });
+    const linha = pts.map(p => p.join(",")).join(" ");
+    html += `<polygon points="0,${H / 2} ${linha} ${W},${H / 2}" fill="var(--nosso)" fill-opacity=".12"/>`;
+    html += `<polyline points="${linha}" fill="none" stroke="var(--nosso)" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
+  }
+  svg.innerHTML = html;
+  svg.style.color = "var(--suave)";
+}
+
+function desenharResultado() {
+  const el = $("resultado");
+  if (!estado.resultado) { el.className = "resultado"; return; }
+  let classe = "empate", titulo = "Empate";
+  if (estado.resultado === "*") { titulo = "Partida interrompida"; }
+  else if (estado.resultado !== "1/2-1/2") {
+    const brancasGanharam = estado.resultado === "1-0", nosEramosBrancas = estado.nosso_lado === "brancas";
+    const vitoria = brancasGanharam === nosEramosBrancas;
+    classe = vitoria ? "vitoria" : "derrota"; titulo = vitoria ? "Vitória do Capablanca" : "Derrota";
+  }
+  el.className = "resultado mostrar " + classe;
+  el.innerHTML = `${titulo} <small>${estado.resultado} · ${MOTIVOS[estado.motivo] || estado.motivo || ""}</small>`;
+}
+
+function desenhar() {
+  if (!estado) return;
+  const nossoEmbaixo = true, cima = estado.nosso_lado === "brancas" ? "pretas" : "brancas";
+  desenharTabuleiro();
+  desenharRelogio("relogio-cima", cima);
+  desenharRelogio("relogio-baixo", estado.nosso_lado);
+  desenharBarra(); desenharPensamento(); desenharLances(); desenharGrafico(); desenharResultado();
+  const chip = $("chip");
+  chip.className = "chip" + (estado.rodando ? " ao-vivo" : "");
+  chip.textContent = estado.rodando ? "ao vivo" : (estado.resultado ? "encerrada" : "parado");
+  $("erro").textContent = estado.erro ? "Erro: " + estado.erro : "";
+}
+
+let ultimaChave = "";
+async function atualizar() {
+  try {
+    const r = await fetch("/estado", { cache: "no-store" });
+    const novo = await r.json();
+    desvio = novo.agora - Date.now() / 1000;
+    const chave = JSON.stringify([novo.fen, novo.lances.length, novo.info, novo.pensando, novo.resultado, novo.relogios, novo.rodando, novo.erro]);
+    estado = novo;
+    if (chave !== ultimaChave) { ultimaChave = chave; desenhar(); }
+  } catch (e) {
+    $("chip").className = "chip"; $("chip").textContent = "servidor desligado";
+  }
+}
+
+function animarRelogios() {   // contagem regressiva suave entre uma consulta e outra
+  if (estado && estado.pensando) { desenharRelogio("relogio-cima", estado.nosso_lado === "brancas" ? "pretas" : "brancas");
+                                   desenharRelogio("relogio-baixo", estado.nosso_lado); }
+  requestAnimationFrame(animarRelogios);
+}
+
+async function enviar(caminho, corpo) {
+  $("erro").textContent = "";
+  const r = await fetch(caminho, { method: "POST", headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify(corpo || {}) });
+  if (!r.ok) { const j = await r.json().catch(() => ({})); $("erro").textContent = j.erro || ("erro " + r.status); }
+  atualizar();
+}
+
+async function iniciar() {
+  const r = await fetch("/opcoes"); const op = await r.json();
+  for (const [k, v] of Object.entries(op.oponentes)) $("oponente").add(new Option(v, k));
+  for (const [k, v] of Object.entries(op.controles)) $("controle").add(new Option(v, k));
+  $("atraso").textContent = op.atraso_s + " s por lance";
+  $("nova").onclick = () => enviar("/nova", { oponente: $("oponente").value, controle: $("controle").value, lado: $("lado").value });
+  $("parar").onclick = () => enviar("/parar");
+  await atualizar();
+  setInterval(atualizar, 350);
+  requestAnimationFrame(animarRelogios);
+}
+iniciar();
+</script>
+</body>
+</html>

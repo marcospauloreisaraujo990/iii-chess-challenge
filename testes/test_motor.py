@@ -787,3 +787,22 @@ def test_ponder_com_stop_que_levanta_erro_nao_derruba():
         def analysis(self, board, info=None):
             return Analise()
     assert partida.Ponder(Motor(), chess.Board()).parar() is True
+
+
+# ====================== ao_pensar (visualizador) ======================
+
+@precisa_stockfish
+def test_ao_pensar_recebe_profundidades_crescentes(motor):
+    vistos = []
+    partida.escolher_lance(chess.Board(), motor, "15+10", RELOGIO, tempo_provisorio_s=0.3, ao_pensar=vistos.append)
+    profundidades = [v["profundidade"] for v in vistos]
+    assert profundidades and profundidades == sorted(set(profundidades))
+    assert all(set(v) == {"profundidade", "nos", "avaliacao", "pv", "decorrido"} for v in vistos)
+
+
+@precisa_stockfish
+def test_ao_pensar_com_erro_nao_atrapalha_a_busca(motor):
+    def quebra(dados):
+        raise RuntimeError("bug no visualizador")
+    lance, info = partida.escolher_lance(chess.Board(), motor, "15+10", RELOGIO, tempo_provisorio_s=0.3, ao_pensar=quebra)
+    assert lance in chess.Board().legal_moves and info["motor_caiu"] is False

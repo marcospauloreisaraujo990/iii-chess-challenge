@@ -316,3 +316,64 @@ def test_simulador_usa_1_thread_por_padrao_e_aceita_mais():
     assert (t["threads"], t["hash_mb"]) == (1, 16)
     t = torneio.montar_tarefas("nossa", "padrao", 2, "15+10", 6.0, 0.2, None, {}, 1, 300, threads=8, hash_mb=256)[0]
     assert (t["threads"], t["hash_mb"]) == (8, 256)
+
+
+# ---------------- ganchos do visualizador ----------------
+
+class _Espiao:
+    def __init__(self):
+        self.eventos = []
+
+    def inicio_lance(self, board, cor, relogios):
+        self.eventos.append(("inicio", cor))
+
+    def fim_lance(self, board, lance, pensou, relogios):
+        self.eventos.append(("fim", lance.uci()))
+
+    def fim_partida(self, resumo):
+        self.eventos.append(("acabou", resumo["resultado"]))
+
+
+def test_observador_recebe_cada_lance_e_o_fim():
+    espiao = _Espiao()
+    torneio.jogar_partida(Roteirizado("f2f3", "g2g4"), Roteirizado("e7e5", "d8h4"), [], "15+10", 0.0, 0.01,
+                          observador=espiao)
+    assert espiao.eventos == [("inicio", chess.WHITE), ("fim", "f2f3"), ("inicio", chess.BLACK), ("fim", "e7e5"),
+                              ("inicio", chess.WHITE), ("fim", "g2g4"), ("inicio", chess.BLACK), ("fim", "d8h4"),
+                              ("acabou", "0-1")]
+
+
+def test_observador_com_erro_nao_derruba_a_partida():
+    class Quebrado:
+        def fim_lance(self, *a):
+            raise RuntimeError("bug no visualizador")
+    r = torneio.jogar_partida(Roteirizado("f2f3", "g2g4"), Roteirizado("e7e5", "d8h4"), [], "15+10", 0.0, 0.01,
+                              observador=Quebrado())
+    assert r["resultado"] == "0-1"
+
+
+def test_cancelar_interrompe_entre_lances():
+    import threading
+    cancelar = threading.Event()
+    cancelar.set()
+    r = torneio.jogar_partida(Roteirizado("e2e4"), Roteirizado("e7e5"), [], "15+10", 0.0, 0.01, cancelar=cancelar)
+    assert (r["resultado"], r["motivo"], r["plies"]) == ("*", "interrompida", 0)
+
+
+def test_fraco_e_uma_versao_valida():
+    assert "fraco" in torneio.VERSOES
+    t = torneio.montar_tarefas("nossa", "fraco", 2, "15+10", 6.0, 0.2, None, {}, 1, 300)
+    assert {x["pretas"] for x in t} | {x["brancas"] for x in t} == {"nossa", "fraco"}
+
+
+@precisa_stockfish
+def test_bot_fraco_real_joga_lance_legal():
+    import partida
+    motor = partida.abrir_motor(STOCKFISH, 1, 16)
+    try:
+        jogador = torneio.JogadorFraco(motor)
+        relogio = torneio.RelogioSim(10, 0, 0)
+        relogio.adversario = torneio.RelogioSim(10, 0, 0)
+        assert jogador.escolher(chess.Board(), relogio) in chess.Board().legal_moves
+    finally:
+        motor.quit()
