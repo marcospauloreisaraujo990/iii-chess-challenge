@@ -37,13 +37,23 @@ PERFIS = {
 # ----------------------------------------------------------------------------------
 
 # Quantos lances ainda devem faltar: LANCES_ESPERADOS - número do lance, mas
-# nunca menos que o mínimo. Até o lance 30 a estimativa cai (na abertura
-# pensamos menos, guardando relógio para o meio-jogo); depois fica fixa em 40.
+# nunca menos que o mínimo. Até o lance 45 a estimativa cai (na abertura
+# pensamos menos, guardando relógio para o meio-jogo); depois fica fixa em 55.
 # Sem incremento (25+0, armageddon) o mínimo é o que impede o relógio de acabar
 # numa partida longa: nas simulações, com mínimo 20 o 25+0 estourava perto do
 # lance 80; com 40 passa do lance 120 (atraso de 5 s por lance).
-LANCES_ESPERADOS = 70
-LANCES_RESTANTES_MINIMO = 40
+#
+# CALIBRAÇÃO de 29/10 (testes/resultados/velocidade_*.md): os valores iniciais eram
+# 70/40 (~15 s por lance no 15+10). Com o atraso humano MEDIDO no ensaio (12 s), 8
+# partidas por configuração contra o Stockfish com a gestão de tempo dele:
+#     70/40  ~15 s/lance   6,5 pontos   0 derrotas nossas por tempo
+#    100/55  ~10 s/lance   7   pontos   0 derrotas nossas por tempo   <- escolhido
+#    130/70  ~7,5 s/lance  7   pontos   0 derrotas nossas por tempo
+# Escolhido 100/55: um terço mais rápido, sem perder no tempo e sem perder pontos.
+# Mais lances restantes = alvo menor = resposta mais rápida. O adversário perdeu
+# por tempo 17 vezes em 24 partidas; nós, nenhuma.
+LANCES_ESPERADOS = 100
+LANCES_RESTANTES_MINIMO = 55
 
 # Reserva que nunca é usada para pensar: o colchão contra imprevisto (Stockfish
 # demorar para responder, operador errar a digitação). É uma fração do relógio,
