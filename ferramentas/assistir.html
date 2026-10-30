@@ -365,7 +365,9 @@ function atualizarRelogios() {   // 10 vezes por segundo: só texto e classes, n
     const t = restante(cor);
     el.classList.toggle("ativo", !!(estado.rodando && estado.pensando === cor));
     el.classList.toggle("critico", t !== null && t < 10);
-    el.querySelector(".tempo").textContent = t === null ? "–:––" : mmss(t);
+    // partida rodando sem relógio nenhum = modo sem limite de tempo
+    el.querySelector(".tempo").textContent =
+      t !== null ? mmss(t) : (estado.rodando && !estado.relogios ? "∞" : "–:––");
   }
 }
 
@@ -518,7 +520,9 @@ function mostrarAba(nova) {
 
 async function iniciar() {
   const op = await (await fetch("/opcoes")).json();
-  for (const r of op.relogios_jogar) $("j-relogio").add(new Option(r === "15+10" ? "15+10 (torneio)" : r, r));
+  const ROTULO_RELOGIO = { "15+10": "15+10 (torneio)",
+                           ilimitado: "Sem limite de tempo (bot pensa ~7 s; ninguém perde por tempo)" };
+  for (const r of op.relogios_jogar) $("j-relogio").add(new Option(ROTULO_RELOGIO[r] || r, r));
   $("j-relogio").value = "5+3";
   for (const a of op.atrasos_jogar) $("j-atraso").add(new Option(a === 0 ? "0 s (o bot joga direto na tela)" : `${a} s (simula a mesa)`, a));
   for (const [k, v] of Object.entries(op.oponentes)) $("a-oponente").add(new Option(v, k));

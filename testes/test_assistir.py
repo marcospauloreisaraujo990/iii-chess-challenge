@@ -418,6 +418,45 @@ def test_jogar_ponder_para_antes_do_bot_pensar(servidor):
     assert registro[:6] == ["ponder-comecou", "ponder-parou", "pensar", "ponder-comecou", "ponder-parou", "pensar"]
 
 
+def test_sem_limite_nao_tem_relogio_e_a_bandeira_nunca_cai(servidor, monkeypatch):
+    """Modo ponte: o relógio de verdade está em outro lugar, então aqui ninguém perde por tempo."""
+    # 0,2 s de relógio: em qualquer perfil normal a bandeira cairia antes de o teste acabar
+    monkeypatch.setitem(assistir.RELOGIOS_JOGAR, assistir.RELOGIO_ILIMITADO, (0.2, 0))
+    porta = servidor(_vis_jogar(["e7e5"]))
+    _pedir(porta, "POST", "/nova", {"modo": "jogar", "lado": "pretas",
+                                    "relogio": assistir.RELOGIO_ILIMITADO})
+    estado = _esperar(porta, lambda e: e["pensando"] == "brancas")
+    assert estado["relogios"] is None and estado["controle"] == "sem limite de tempo"
+    time.sleep(0.5)                                   # muito mais que o relógio: não pode acontecer nada
+    estado = json.loads(_pedir(porta, "GET", "/estado")[1])
+    assert estado["resultado"] is None and estado["rodando"] and estado["relogios"] is None
+    _pedir(porta, "POST", "/lance", {"uci": "e2e4"})  # o bot responde e segue sem relógio
+    estado = _esperar(porta, lambda e: len(e["lances"]) == 2)
+    assert estado["relogios"] is None and estado["resultado"] is None
+
+
+def test_sem_limite_o_relogio_que_vai_para_o_tempo_py_nao_anda(servidor):
+    """O tempo.py recebe sempre o mesmo restante: o bot pensa igual em todo lance, sem esvaziar."""
+    vistos = []
+
+    def escolher(board, motor, perfil, relogio, caminho_book=None, ao_pensar=None, **k):
+        vistos.append(relogio["restante_s"])
+        lance = next(iter(board.legal_moves))
+        return lance, {"book": False, "profundidade": 15, "nos": 1, "avaliacao": 0.0, "pv": [lance],
+                       "tempo_s": 0.0, "motor_caiu": False}
+
+    vis = assistir.Visualizador(abrir_bot=MotorFalso, escolher=escolher, ponder=PonderFalso)
+    porta = servidor(vis)
+    _pedir(porta, "POST", "/nova", {"modo": "jogar", "lado": "brancas",
+                                    "relogio": assistir.RELOGIO_ILIMITADO})
+    _esperar(porta, lambda e: e["pensando"] == "pretas")
+    for lance in ("e7e5", "b8c6"):
+        _pedir(porta, "POST", "/lance", {"uci": lance})
+        _esperar(porta, lambda e: e["pensando"] == "pretas")
+    assert len(vistos) >= 3 and len(set(vistos)) == 1   # o mesmo relógio em todos os lances
+    assert vistos[0] == float(assistir.RELOGIOS_JOGAR[assistir.RELOGIO_ILIMITADO][0])
+
+
 def test_jogar_parametros_invalidos(servidor):
     porta = servidor(_vis_jogar([]))
     for ruim in ({"relogio": "99+99"}, {"lado": "verde"}, {"atraso": 7}, {"atraso": "abc"}):

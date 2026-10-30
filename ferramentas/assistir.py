@@ -55,7 +55,18 @@ CONTROLES = {
 }
 LADOS = ("brancas", "pretas")
 # Modo "jogar contra o bot": relógios de verdade, como nos sites. (inicial em s, incremento em s)
-RELOGIOS_JOGAR = {"3+2": (180, 2), "5+3": (300, 3), "10+5": (600, 5), "15+10": (900, 10), "25+0": (1500, 0)}
+#
+# "ilimitado" é o modo SEM TEMPO: ninguém perde por bandeira, dos dois lados. O relógio do bot NÃO
+# anda: o tempo.py recebe sempre o mesmo restante, então o bot pensa o mesmo em todo lance e a
+# partida nunca acaba por tempo. É o modo para usar a tela como PONTE, quando o relógio de verdade
+# está em outro lugar (Lichess, cronômetro da mesa) e o nosso relógio só atrapalharia.
+#
+# A base é o 5+3 porque é a que dá o ritmo do torneio. Medido com tempo.calcular_tempo(atraso 0),
+# alvo e máximo por lance: 5+3 -> 6 a 8 s (máx. 15 a 21 s); 15+10 -> 19 a 26 s (máx. 48 a 66 s,
+# lento demais para ponte: estouraria o relógio do outro lado); 3+2 -> 4 a 5 s (máx. 9 a 13 s).
+RELOGIO_ILIMITADO = "ilimitado"
+RELOGIOS_JOGAR = {"3+2": (180, 2), "5+3": (300, 3), "10+5": (600, 5), "15+10": (900, 10), "25+0": (1500, 0),
+                  RELOGIO_ILIMITADO: (300, 3)}
 ATRASOS_JOGAR = (0, 6, 12)   # atraso humano simulado do nosso bot; na tela não há mesa, então o padrão é 0
 NOME_HUMANO = "Você (ou o bot da outra máquina)"
 
@@ -377,13 +388,15 @@ class Visualizador:
             self.fila_humano = queue.Queue()
             humano = "pretas" if lado == "brancas" else "brancas"
             inicio, incremento = RELOGIOS_JOGAR[relogio]
+            ilimitado = relogio == RELOGIO_ILIMITADO
             self.estado.reiniciar(rodando=True, modo="jogar", nosso_lado=lado, oponente=NOME_HUMANO,
-                                  controle=f"{relogio} (relógio real)",
+                                  controle=("sem limite de tempo" if ilimitado else f"{relogio} (relógio real)"),
                                   nomes={lado: "Capablanca (nosso bot)", humano: NOME_HUMANO},
-                                  relogios={"brancas": float(inicio), "pretas": float(inicio)})
+                                  relogios=(None if ilimitado
+                                            else {"brancas": float(inicio), "pretas": float(inicio)}))
             self.fio = threading.Thread(target=self._jogar_humano, daemon=True,
                                         args=(lado, inicio, incremento, atraso, self.cancelar, self.geracao,
-                                              self.fila_humano))
+                                              self.fila_humano, ilimitado))
             self.fio.start()
 
     def lance_humano(self, uci):
@@ -403,7 +416,7 @@ class Visualizador:
             self.tabuleiro_humano = None
             self.fila_humano.put(("desistir", None))
 
-    def _jogar_humano(self, lado, inicio, incremento, atraso, cancelar, geracao, fila):
+    def _jogar_humano(self, lado, inicio, incremento, atraso, cancelar, geracao, fila, ilimitado=False):
         bot = chess.WHITE if lado == "brancas" else chess.BLACK
         nome = {chess.WHITE: "brancas", chess.BLACK: "pretas"}
         ativa = lambda: self.geracao == geracao
@@ -416,8 +429,9 @@ class Visualizador:
 
         def mostrar(**extra):
             if ativa():
-                self.estado.atualizar(fen=board.fen(), relogios={"brancas": restante[chess.WHITE],
-                                                                  "pretas": restante[chess.BLACK]},
+                self.estado.atualizar(fen=board.fen(),
+                                      relogios=(None if ilimitado else {"brancas": restante[chess.WHITE],
+                                                                        "pretas": restante[chess.BLACK]}),
                                       xeque=(chess.square_name(board.king(board.turn))
                                              if board.is_check() and board.king(board.turn) is not None else None),
                                       **extra)
@@ -468,7 +482,8 @@ class Visualizador:
                             legais=[l.uci() for l in board.legal_moves])
                     pensador = self.ponder(motor, board)   # o bot pensa no seu tempo, como na mesa
                     try:
-                        item = fila.get(timeout=max(0.0, restante[cor]))
+                        # sem limite: espera o lance para sempre, nunca cai a bandeira
+                        item = fila.get(timeout=None if ilimitado else max(0.0, restante[cor]))
                         chegou = time.monotonic()   # o relógio do humano para aqui
                     except queue.Empty:
                         item = ("tempo", None)
@@ -492,15 +507,16 @@ class Visualizador:
                         break
                     if tipo == "tempo":
                         gasto = restante[cor] + 0.001
-                restante[cor] -= gasto
-                if restante[cor] <= 0:
-                    restante[cor] = 0.0
-                    if board.has_insufficient_material(not cor):
-                        resultado, motivo = "1/2-1/2", "tempo-sem-material"
-                    else:
-                        resultado, motivo = ("0-1" if cor == chess.WHITE else "1-0"), "tempo"
-                    break
-                restante[cor] += incremento
+                if not ilimitado:
+                    restante[cor] -= gasto
+                    if restante[cor] <= 0:
+                        restante[cor] = 0.0
+                        if board.has_insufficient_material(not cor):
+                            resultado, motivo = "1/2-1/2", "tempo-sem-material"
+                        else:
+                            resultado, motivo = ("0-1" if cor == chess.WHITE else "1-0"), "tempo"
+                        break
+                    restante[cor] += incremento
                 san = board.san(lance)
                 board.push(lance)
                 if ativa():
