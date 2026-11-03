@@ -11,7 +11,9 @@ da **gestão de tempo própria** (`tempo.py`), que é a nossa modificação sign
   `stockfish-linux-x86-64-universal.tar.gz` do GitHub oficial (official-stockfish/Stockfish).
   SHA-256: `9defc0d4e55d49c65a6d042f3e571a39fcea499ade6dbe741b53b8c65e03611f`.
   Fica em `stockfish/`, fora do Git. O código-fonte vem junto no mesmo arquivo (pasta `src/`).
-- Licença: GPLv3 (ver LICENSE). Código-fonte publicado neste repositório.
+- Commit de origem da tag `sf_19`: `edb0d9db6731067ec50ce619ff372b463bc4dd5d`. O Stockfish é usado **sem
+  modificações**; o código-fonte oficial está em github.com/official-stockfish/Stockfish (tag `sf_19`).
+- Licença: GPLv3 (ver LICENSE). O código-fonte do nosso programa está publicado neste repositório.
 - Biblioteca: python-chess 1.11.2 (regras do jogo, leitura de book e tablebases). Não escolhe lances.
 
 ## Quem é responsável por quê (cada um defende o seu na arguição)
