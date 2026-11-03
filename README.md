@@ -226,7 +226,20 @@ recebem as tablebases, enquanto o Lichess não as usa nesses níveis. As duas re
 (o adversário emulado fica um pouco mais forte que o original), então o placar é um piso, não um teto.
 
 ## Resultados dos testes (para a arguição)
-<!--RESULTADOS-->
+Medidos com `testes/torneio.py` (29/10): `nossa` x `padrao` (a gestão de tempo do próprio Stockfish), perfil
+15+10, escala 0,1, **atraso humano de 12 s** (medido no ensaio entre dois computadores), 8 partidas por linha,
+cores alternadas, 1 thread, 16 MB. Arquivos completos (tabela, CSV e PGN) em `testes/resultados/`.
+
+| Constantes do `tempo.py` (LANCES_ESPERADOS / MÍNIMO) | Nossa: V-E-D | Pontos nossa x padrão | Nossas derrotas por tempo | Derrotas por tempo do padrão | Arquivo |
+|---|---|---|---|---|---|
+| 70 / 40 (valor inicial) | 5-3-0 | 6,5 x 1,5 | 0 | 5 | `velocidade_atual.md` |
+| **100 / 55 (escolhido)** | 6-2-0 | 7 x 1 | 0 | 6 | `velocidade_rapida.md` |
+| 130 / 70 | 6-2-0 | 7 x 1 | 0 | 6 | `velocidade_muito_rapida.md` |
+
+Leitura: o mesmo Stockfish, com a gestão de tempo dele, perde por tempo quando a mesa gasta 12 s por lance,
+porque ele não sabe desse atraso; a nossa gestão desconta o atraso e não perdeu nenhuma partida por tempo.
+Entre 70/40 e 100/55 a diferença de pontos é pequena demais para 8 partidas; o 100/55 foi escolhido por
+responder cerca de um terço mais rápido sem perder por tempo.
 
 ## Prazos
 Congelar o código: 02/11. Envio do Git para icev@somosicev.com: 04/11/2026. Ensaio geral: 05/11. Torneio: 06/11.
