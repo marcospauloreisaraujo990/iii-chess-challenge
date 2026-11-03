@@ -17,12 +17,13 @@ da **gestão de tempo própria** (`tempo.py`), que é a nossa modificação sign
 ## Quem é responsável por quê (cada um defende o seu na arguição)
 | Módulo | Responsável | O que faz |
 |---|---|---|
-| `tempo.py` | Marcos Paulo | **Modificação significativa.** Gestão de tempo escrita do zero: alvo e máximo por lance, desconto do atraso humano, parada em tempo real, atalho de tempo zero, modo economia, sincronização do relógio (`t mm:ss`), perfis de relógio. |
+| `tempo.py` | Marcos Paulo | **Modificação significativa.** Gestão de tempo própria, escrita do zero (não deriva da gestão de tempo do Stockfish): alvo e máximo por lance, desconto do atraso humano, parada em tempo real, atalho de tempo zero, modo economia, sincronização do relógio (`t mm:ss`), perfis de relógio. |
 | `partida.py`, `log.py` | Junio | Laço da partida, leitura e validação dos lances em UCI, comandos de emergência, relógio interno, motor com reinício automático e vigia (watchdog), log e PGN. |
 | `book.py`, `ferramentas/`, `testes/torneio.py` | Léo | Book de aberturas, gerador do book, download das tablebases, simulador de partidas. |
 
-Parte do código de `partida.py`, `log.py`, `book.py`, das ferramentas e dos testes foi desenvolvida com
-apoio do Claude Code (assistente de IA), sob revisão do responsável de cada módulo.
+Parte do código de todos os módulos, **inclusive o `tempo.py`**, além de `partida.py`, `log.py`, `book.py`,
+das ferramentas e dos testes, foi desenvolvida com apoio do Claude Code (assistente de IA). O responsável de
+cada módulo definiu o que fazer, revisou, testou e defende o seu código na arguição.
 
 ## O que NÃO é autoria nossa (terceiros)
 - **Stockfish 19**: motor de busca e avaliação (GPLv3).

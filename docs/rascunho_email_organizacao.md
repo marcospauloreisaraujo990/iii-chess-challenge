@@ -31,6 +31,8 @@ tempo será usado** no torneio.
   tempo com tempo fixo por lance e com a gestão padrão do Stockfish.
 - **Terceiros:** opening book gerado a partir de aberturas da Lichess (licença CC0) e tablebases
   Syzygy de até 5 peças (origem declarada no README).
+- **Apoio de IA:** parte do código, inclusive o `tempo.py`, foi desenvolvida com apoio do Claude Code
+  (assistente de IA), como declarado no README. Cada integrante revisou, testou e defende o seu módulo.
 
 Ficamos à disposição para qualquer esclarecimento.
 
