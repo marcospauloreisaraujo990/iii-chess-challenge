@@ -630,6 +630,7 @@ def test_variavel_invalida_cai_no_automatico(monkeypatch, ruim):
     monkeypatch.setenv("CAPABLANCA_THREADS", ruim)
     monkeypatch.delenv("CAPABLANCA_HASH_MB", raising=False)
     monkeypatch.setattr(partida, "threads_automaticas", lambda: 7)
+    _pc_do_torneio(monkeypatch)   # sem isto, num PC com menos de 7 threads o teto corta para as threads reais
     assert partida.configuracao_do_motor()[0] == 7
 
 
