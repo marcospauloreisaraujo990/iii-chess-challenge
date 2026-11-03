@@ -1,0 +1,9 @@
+partida,brancas,pretas,resultado,motivo,meios_lances,sobrou_brancas_s,sobrou_pretas_s
+0,nossa,padrao,1-0,tempo,75,48.01,-0.40
+1,padrao,nossa,0-1,tempo,44,-0.06,63.98
+2,nossa,padrao,1/2-1/2,threefold_repetition,83,51.27,1.94
+3,padrao,nossa,0-1,tempo,80,-0.04,49.77
+4,nossa,padrao,1-0,tempo,77,45.25,-0.65
+5,padrao,nossa,0-1,tempo,86,-0.16,46.05
+6,nossa,padrao,1/2-1/2,threefold_repetition,78,46.83,4.22
+7,padrao,nossa,0-1,tempo,50,-0.32,61.36

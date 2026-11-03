@@ -1,234 +1,245 @@
-# III Chess Challenge — Equipe ICEV
+# Capablanca — III Chess Challenge (ICEV 2026)
 
-**Marcos Paulo · Junio · Léo**
+Equipe: Marcos Paulo, Junio, Léo.
 
-Motor de xadrez em Python escrito pela equipe: uma **função de avaliação heurística**, uma **busca
-Negamax com poda Alfa-Beta** e uma **gestão de tempo própria**. A biblioteca python-chess cuida só
-das regras do jogo: tabuleiro, lances legais e leitura dos arquivos de book e de tablebase. Quem
-escolhe o lance é o nosso código.
+Programa de linha de comando para jogar o torneio: o **Stockfish** calcula os lances e o nosso
+código cuida do resto (relógio, book, tablebases, log, comandos de emergência) e, principalmente,
+da **gestão de tempo própria** (`tempo.py`), que é a nossa modificação significativa.
 
-> **Status: Sprint 0, estrutura pronta.** Cada arquivo traz o card, o responsável, o checklist e
-> as funções que os outros módulos esperam (o contrato). As funções ainda levantam
-> `NotImplementedError`, e cada um implementa as suas no próprio card.
+## Projeto-base declarado
+- Motor: Stockfish 19 (local, via UCI). Release `sf_19` (05/09/2026), arquivo
+  `stockfish-linux-x86-64-universal.tar.gz` do GitHub oficial (official-stockfish/Stockfish).
+  SHA-256: `9defc0d4e55d49c65a6d042f3e571a39fcea499ade6dbe741b53b8c65e03611f`.
+  Fica em `stockfish/`, fora do Git. O código-fonte vem junto no mesmo arquivo (pasta `src/`).
+- Licença: GPLv3 (ver LICENSE). Código-fonte publicado neste repositório.
+- Biblioteca: python-chess 1.11.2 (regras do jogo, leitura de book e tablebases). Não escolhe lances.
 
----
+## Quem é responsável por quê (cada um defende o seu na arguição)
+| Módulo | Responsável | O que faz |
+|---|---|---|
+| `tempo.py` | Marcos Paulo | **Modificação significativa.** Gestão de tempo própria, escrita do zero (não deriva da gestão de tempo do Stockfish): alvo e máximo por lance, desconto do atraso humano, parada em tempo real, atalho de tempo zero, modo economia, sincronização do relógio (`t mm:ss`), perfis de relógio. |
+| `partida.py`, `log.py` | Junio | Laço da partida, leitura e validação dos lances em UCI, comandos de emergência, relógio interno, motor com reinício automático e vigia (watchdog), log e PGN. |
+| `book.py`, `ferramentas/`, `testes/torneio.py` | Léo | Book de aberturas, gerador do book, download das tablebases, simulador de partidas. |
 
-## Estrutura
+Parte do código de todos os módulos, **inclusive o `tempo.py`**, além de `partida.py`, `log.py`, `book.py`,
+das ferramentas e dos testes, foi desenvolvida com apoio do Claude Code (assistente de IA). O responsável de
+cada módulo definiu o que fazer, revisou, testou e defende o seu código na arguição.
 
-```
-iii-chess-challenge/
-├── main.py                  Programa da mesa: loop de jogo, entrada UCI, comandos     Junio  · S1 e S3
-├── engine/
-│   ├── evaluation.py        Avaliação heurística: material + tabelas de casas (AUTORAL)  Marcos · S1
-│   ├── search.py            Negamax + Alfa-Beta + aprofundamento iterativo (AUTORAL)      Marcos · S2
-│   ├── book.py              Opening book Polyglot, só até o meio-lance 10               Léo    · S1
-│   ├── syzygy.py            Tablebases de finais, até 5 peças                           Léo    · S2
-│   ├── time_manager.py      Gestão de tempo: orçamento por lance e relógio virtual      Junio  · S2
-│   └── logger.py            Log da banca com os 8 campos                                Junio  · S1
-├── tests/
-│   ├── test_estrutura.py    Estrutura e regras fixas (já passam)
-│   ├── test_<módulo>.py     Testes de cada card (pendentes até o card ser implementado)
-│   └── simulate_match.py    Nosso bot × Stockfish limitado                              Léo    · S3
-├── assets/
-│   ├── book/                book.bin (Polyglot)
-│   ├── syzygy/              tablebases de 3, 4 e 5 peças (fora do Git)
-│   └── stockfish/           só para os testes (fora do Git)
-├── logs/                    logs das partidas (fora do Git)
-├── .vscode/                 configuração do VS Code (F5, testes, tarefas)
-└── requirements.txt         só python-chess
-```
+## O que NÃO é autoria nossa (terceiros)
+- **Stockfish 19**: motor de busca e avaliação (GPLv3).
+- **python-chess 1.11.2**: regras, leitura de book e tablebases (GPLv3).
+- **Opening book** `book/book.bin`: **gerado por nós** com `ferramentas/gerar_book.py` a partir das
+  aberturas do repositório [lichess-org/chess-openings](https://github.com/lichess-org/chess-openings)
+  (licença **CC0**, domínio público; estado do `master` em 29/10/2026, commit `712a58be746c`).
+  Os arquivos `a.tsv` ... `e.tsv` e o texto da licença estão em `ferramentas/dados/chess-openings/`.
+  Como funciona: cada abertura é percorrida até o meio-lance 10 e cada lance recebe um peso igual a
+  quantas aberturas o usam. O book é reproduzível (um teste confere que o arquivo do Git é idêntico
+  ao que o gerador produz hoje).
+- **Tablebases Syzygy de 3, 4 e 5 peças** (nunca 6 ou 7): tabelas de Ronde Veldhuizen, baixadas do
+  servidor da Lichess (`tablebase.lichess.ovh/tables/standard/3-4-5-wdl` e `3-4-5-dtz`, ~1 GB) com
+  `ferramentas/baixar_tablebases.py`. A integridade é conferida por MD5 contra a lista oficial do
+  espelho do Sesse (`tablebase.sesse.net/syzygy/3-4-5/checksum.md5`), fixada no Git em
+  `ferramentas/dados/tablebases-3-4-5.md5`. Ficam em `tablebases/`, **fora do Git** (entregues em
+  mídia física).
 
-## Como as peças se conectam
-
-Na **nossa vez**, o `main.py` segue esta ordem:
-
-1. `book.get_book_move(board)`: devolve um lance do book ou `None`. Só funciona até o meio-lance 10.
-2. `syzygy.best_move(board)`: devolve o lance da tablebase ou `None`. Só funciona com 5 peças ou menos.
-3. `time_manager.compute_time_budget(restante, incremento, lance)` devolve quantos segundos pensar.
-   Esse valor vai para `search.search(board, segundos)`, que devolve um `SearchResult`.
-4. `logger.log_move(...)` grava a linha com os 8 campos.
-5. O lance aparece na tela em destaque, em UCI, para ser anunciado.
-
-`search.search()` chama `evaluation.evaluate()` nas folhas da árvore e pode consultar
-`syzygy.probe_wdl()` quando restam 5 peças ou menos.
-
-Na **vez do adversário**, o programa lê o lance em UCI, valida contra `board.legal_moves` e só então
-aplica. Uma entrada errada nunca derruba o programa.
-
-**Convenção de avaliação:** os valores são em centipawns (100 = um peão). `evaluate()` dá a nota do
-ponto de vista de **quem joga agora** (convenção Negamax). No `SearchResult` e no log, a nota é do
-**nosso** ponto de vista.
-
----
-
-## 1. Preparar o ambiente (com internet, uma vez por computador)
-
-1. Instale o **Python 3.11 ou mais novo** (python.org). No Windows, marque **"Add python.exe to PATH"**.
-2. Instale o **VS Code** e abra a pasta do projeto em **Arquivo → Abrir Pasta**. Abra a pasta onde
-   está o `main.py`. O VS Code vai sugerir as extensões recomendadas (Python): aceite.
-3. Crie o ambiente virtual e instale a dependência. Escolha **uma** destas opções:
-   - **Terminal → Executar Tarefa → "1. Criar ambiente virtual (.venv) e instalar dependências"**; ou
-   - `Ctrl+Shift+P` → **Python: Create Environment** → **Venv** → marque `requirements.txt`; ou
-   - no terminal:
-     ```
-     python -m venv .venv
-     .venv\Scripts\activate            (Windows)
-     source .venv/bin/activate         (Mac/Linux)
-     pip install -r requirements.txt
-     ```
-4. `Ctrl+Shift+P` → **Python: Select Interpreter** → escolha o `.venv`.
-5. Confira se está tudo certo:
+## Como instalar (com internet, uma vez, antes do torneio)
+1. Python 3.11 ou mais novo, ambiente virtual e dependências:
    ```
-   python main.py
-   python -m unittest discover -s tests -t . -v
+   python -m venv .venv
+   source .venv/bin/activate        # Windows: .venv\Scripts\activate
+   pip install -r requirements.txt
    ```
-   O `main.py` deve mostrar o tabuleiro e o próximo passo. Nos testes, `test_estrutura` precisa
-   passar e os demais aparecem como *skipped* (pendentes).
+2. **Stockfish**: baixe o build certo para o sistema na página de releases oficial
+   (github.com/official-stockfish/Stockfish/releases) e coloque o executável em `stockfish/`.
+   O programa o encontra sozinho (primeiro arquivo `stockfish-*` executável). Para Linux, o build
+   `x86-64-universal` usado aqui funciona em qualquer processador x86-64. No Windows, use o `.exe` do
+   mesmo release.
+3. **Book**: já está no Git (`book/book.bin`). Para regerar: `python ferramentas/gerar_book.py`.
+4. **Tablebases** (3 a 5 peças): `python ferramentas/baixar_tablebases.py` (~1 GB). Rodar de novo só
+   baixa o que faltar. Para só conferir: `--so-conferir`.
+5. **Verificar o PC do torneio** (obrigatório, na máquina que vai para a mesa):
+   ```
+   python ferramentas/verificar_maquina.py
+   ```
+   Confere Python, python-chess, Stockfish, book e tablebases, **mede quantas threads deixam o Stockfish
+   mais rápido nessa máquina** e imprime os comandos prontos para o dia. Use o número que ele medir:
+   num notebook de teste, 6 threads foram mais rápidas que 11 (o processador reduz a velocidade quando
+   todas trabalham), então o padrão automático nem sempre é o melhor.
 
-Se o PowerShell disser que "a execução de scripts foi desabilitada", rode uma vez
-`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` ou use o terminal **Command Prompt**.
+Depois disso, **o programa não usa internet**: roda inteiro no computador, com Wi-Fi e cabo de rede desligados.
 
-## 2. Rodar sem internet
-
-Depois do passo 1, **o programa não usa internet para nada**. Ele roda inteiro no notebook, com o
-Wi-Fi e os dados móveis desligados.
-
-Para instalar num notebook que **não tem internet** (por exemplo, o da mesa):
-
-1. Num computador com internet e com o `.venv` ativo:
-   **Executar Tarefa → "3. Baixar pacotes para instalar sem internet"**, ou
-   `pip wheel -r requirements.txt -w wheels`.
-   Isso cria a pasta `wheels/` com o python-chess pronto para instalar.
-2. Copie o projeto inteiro (com `wheels/`, `assets/book/` e `assets/syzygy/`) para o pendrive.
-3. No notebook sem internet:
+### No Windows
+1. Instale o Python 3.11+ (python.org), marcando **"Add python.exe to PATH"**.
+2. No terminal (PowerShell), na pasta do projeto:
    ```
    python -m venv .venv
    .venv\Scripts\activate
-   pip install --no-index --find-links wheels -r requirements.txt
+   pip install -r requirements.txt
    ```
-   Ou use a tarefa **"4. Instalar sem internet"**.
-4. Desligue o Wi-Fi e rode `python main.py`.
-
-### No dia do torneio
-
-- [ ] Wi-Fi e dados móveis **desligados**
-- [ ] `python -m unittest discover -s tests -t .` passando no notebook da mesa
-- [ ] `assets/book/book.bin` presente; `assets/syzygy/` só com tabelas de até 5 peças
-- [ ] Notebook no carregador, sem suspensão de tela
-- [ ] Rodar `python main.py` pelo terminal, não pelo depurador
-
-## 3. No VS Code
-
-| Atalho | O que faz |
-| --- | --- |
-| **F5** (aba Executar e Depurar) | `Jogar (main.py)`, `Jogar de brancas, 15+10`, `Testes (todos)`, `Simular partidas contra o Stockfish` |
-| Ícone do **frasco** (Testes) | Roda e mostra cada teste, por card |
-| **Terminal → Executar Tarefa** | Criar ambiente, rodar testes, baixar e instalar sem internet |
-
----
-
-## 4. Regras do torneio que o código precisa respeitar
-
-| Regra | Onde é garantida |
-| --- | --- |
-| O book só decide os **10 primeiros meios-lances**; com `board.ply() >= 10`, devolve `None` (FAQ 3) | `engine/book.py` (`MAX_BOOK_PLY = 10`) |
-| Tablebases de **até 5 peças**, nunca 6 ou 7 (FAQ 4) | `engine/syzygy.py` (`MAX_PIECES = 5`) e `assets/syzygy/` |
-| Log com os **8 campos** a cada lance nosso: número do lance, cor, lance, depth, nós, avaliação, PV e tempo | `engine/logger.py` |
-| Lances do adversário e os nossos em **UCI** (ex.: `e2e4`, `e7e8q`); entrada errada não derruba o programa | `main.py` |
-| Controle de tempo **15 min + 10 s** | `engine/time_manager.py` |
-| Dependências: **somente python-chess** | `requirements.txt` |
-| Jogar **sem internet** | seção 2 |
-| Entrega: repositório Git para **icev@somosicev.com** até **04/11/2026** | seção 7 |
-
-O `tests/test_estrutura.py` confere os limites fixos (10 meios-lances, 5 peças, 8 campos, 15+10 e
-requirements). Se alguém mudar um desses valores por engano, o teste falha.
-
----
-
-## 5. Declaração de autoria
-
-| Parte | Autoria |
-| --- | --- |
-| `engine/evaluation.py`, `engine/search.py`: avaliação e busca, o núcleo da inteligência | **Equipe** (Marcos Paulo) |
-| `main.py`, `engine/logger.py`, `engine/time_manager.py`: programa da mesa, log e gestão de tempo | **Equipe** (Junio) |
-| `engine/book.py`, `engine/syzygy.py`, `tests/`: integração do book e das tablebases, testes | **Equipe** (Léo) |
-| **python-chess 1.11.2** (GPLv3): tabuleiro, regras, lances legais, leitura de book e de tablebases. Não escolhe lances | Terceiros |
-| `assets/book/book.bin`: opening book Polyglot. Origem e licença em `assets/book/LEIA.txt`; book não conta como autoria (FAQ 3) | Terceiros |
-| Tablebases Syzygy de até 5 peças. Origem em `assets/syzygy/LEIA.txt` | Terceiros |
-| Stockfish: apenas adversário de treino em `tests/simulate_match.py`; **não faz parte do motor** | Terceiros |
-
-### Modificação significativa
-
-O python-chess só conhece as regras: gera os lances legais, mas não sabe qual é o melhor. A
-escolha do lance é toda feita por código da equipe, em `engine/evaluation.py` e `engine/search.py`:
-
-- **Função de avaliação própria** (`evaluate`): soma o material (peão 100, cavalo 320, bispo 330,
-  torre 500, dama 900) com tabelas de casas (PST) para cada peça. Elas premiam peões e cavalos no
-  centro, bispos em casas centrais, torres na 7ª fileira e o rei protegido na ala do roque, e
-  penalizam peças no canto. A nota é sempre do ponto de vista de quem joga (convenção do Negamax).
-- **Negamax com poda Alfa-Beta** (`negamax`): olha a árvore de lances e descarta os ramos que o
-  adversário nunca deixaria acontecer. Mate é pontuado como `MATE_SCORE - ply`, então o motor
-  prefere o mate mais rápido e adia o mate que sofre. Repetição, regra dos 50 lances e material
-  insuficiente contam como empate.
-- **Aprofundamento iterativo com limite de tempo** (`search`): busca na profundidade 1, 2, 3…
-  enquanto houver tempo e devolve o lance da última profundidade completa. O relógio é conferido
-  a cada 256 posições, e o motor não começa uma profundidade que não terminaria.
-- **Ordenação de lances** (`order_moves`): primeiro o melhor lance da profundidade anterior,
-  depois promoções e capturas por MVV-LVA (vítima mais valiosa, atacante menos valioso). Uma
-  ordem boa faz a poda Alfa-Beta cortar muito mais cedo.
-- **Busca de quiescência** (`quiescence`): no fim da árvore, o motor continua olhando as capturas
-  até a posição ficar calma. Isso evita o "efeito horizonte", por exemplo trocar a dama por um
-  peão defendido achando que ganhou material.
-- **Tablebases dentro da busca**: com 5 peças ou menos, a busca consulta `syzygy.probe_wdl()` e
-  usa o resultado teórico (vitória, empate ou derrota) em vez de calcular.
-
-Como o projeto usa python-chess (GPLv3), a equipe deve decidir a licença do repositório antes da
-entrega. A GPLv3 é a escolha compatível.
-
----
-
-## 6. Sprints e cards
-
-| Sprint | Card | Responsável | Pontos | Arquivo |
-| --- | --- | --- | --- | --- |
-| 0 | Estrutura inicial do projeto e configurações | Equipe | 3 | este repositório |
-| 1 | Representação e função de avaliação heurística | Marcos | 4 | `engine/evaluation.py` |
-| 1 | CLI principal, entradas e sistema de logs | Junio | 4 | `main.py`, `engine/logger.py` |
-| 1 | Opening book local (.bin) com limite estrito | Léo | 4 | `engine/book.py` |
-| 2 | Negamax com poda Alfa-Beta | Marcos | 5 | `engine/search.py` |
-| 2 | Gestão de tempo própria (clock budget) | Junio | 4 | `engine/time_manager.py` |
-| 2 | Integração de tablebases (finais) | Léo | 3 | `engine/syzygy.py` |
-| 3 | Comandos de emergência na mesa (`desfazer`, `t mm:ss`) | Junio | 3 | `main.py`, `engine/time_manager.py` |
-| 3 | Testes automatizados vs. Stockfish nível 1 | Léo | 3 | `tests/simulate_match.py` |
-| 3 | Preparar repositório e entrega final | Equipe | 2 | README, `assets/` |
-
-Os testes de cada card já estão escritos em `tests/test_<módulo>.py`, com alguns exemplos para
-começar. Eles aparecem como *pendentes* até o card ser implementado e, a partir daí, passam a valer
-sozinhos.
-
----
-
-## 7. Git: repositório e fluxo da equipe
-
-O repositório local já está criado, com o primeiro commit. Para publicar no GitHub:
-
-1. No GitHub: **New repository** → nome `iii-chess-challenge`, **privado**, **sem** README.
-2. Na pasta do projeto:
+   Se o PowerShell disser que scripts estão desabilitados, rode uma vez
+   `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+3. Baixe o **`stockfish-windows-x86-64-universal.zip`** do release `sf_19` (o mesmo release do Linux; o build
+   universal escolhe sozinho as instruções do processador), confira o SHA-256
+   `3c8bf1f9ea66a09350a40df4f632288285ac206d99f33ab5842c408fc30b48a7`
+   (PowerShell: `Get-FileHash .\stockfish-windows-x86-64-universal.zip`), descompacte e coloque o `.exe`
+   dentro de `stockfish/`.
+4. `python ferramentas/baixar_tablebases.py` e depois `python ferramentas/verificar_maquina.py`.
+5. Para o dia, defina os valores medidos e rode:
    ```
-   git remote add origin https://github.com/SEU-USUARIO/iii-chess-challenge.git
-   git push -u origin main
+   $env:CAPABLANCA_THREADS=15; $env:CAPABLANCA_HASH_MB=2048; $env:CAPABLANCA_ATRASO_HUMANO_S=12
+   python partida.py
    ```
-3. No GitHub: **Settings → Collaborators → Add people** e adicione o Junio e o Léo.
-4. Junio e Léo: `git clone <url>` e depois o passo 1 deste README.
+   (troque 15 e 2048 pelo que o verificador recomendar).
 
-**Fluxo de trabalho:** uma branch por card. Faça o merge na `main` só com os testes passando.
+## Como rodar uma partida
+```
+python partida.py
+```
+O programa pergunta a **cor** (brancas/pretas), o **perfil de relógio** (`15+10`, `25+0` ou
+`armageddon`; no armageddon as brancas têm 5 min, as pretas 4 min e o empate classifica as pretas) e o
+**atraso humano** por lance (segundos que a equipe gasta anunciando, movendo a peça e apertando o
+relógio; sai da medição na mesa). Depois joga: na nossa vez mostra, em destaque, `>>> JOGUE: e2e4`;
+na vez do adversário o operador digita o lance dele em **UCI** (`e2e4`, roque `e1g1`, promoção `e7e8q`).
+
+### Comandos de emergência (digitados no lugar de um lance)
+| Comando | O que faz |
+|---|---|
+| `desfazer` | Desfaz o último meio-lance (corrige lance digitado errado). Na nossa vez o motor **não** pensa sozinho depois disso: espere acertar a posição e digite `go`. |
+| `go` | Libera o motor para pensar (depois de `desfazer` ou `fen` na nossa vez). |
+| `tab` | Mostra o tabuleiro do programa, o FEN e de quem é a vez (para conferir com o tabuleiro físico, que é a fonte da verdade). |
+| `fen <posição>` | Recarrega a posição a partir de um FEN (inclua o número do lance real no último campo). Depois disso o book fica desligado. |
+| `t mm:ss` | Acerta o relógio interno com o relógio físico (ex.: `t 12:34`). Se o valor for maior que o possível no perfil, pede confirmação. |
+
+### Se algo der errado
+- Motor travou ou caiu: o programa o reinicia sozinho. Se não voltar, passa para o **modo manual**
+  (o operador digita também o nosso lance).
+- Ctrl+C não fecha a partida. Teclado fechado: salva log e PGN e sai.
+- Fim de partida por engano de digitação (ex.: mate que não existe): no aviso final digite `desfazer`.
+
+### Força do motor: threads, hash e ponder
+- **Threads e hash:** sem configuração, o programa usa todas as threads da CPU menos 1 e 1/8 da RAM
+  (até 4 GB). No PC do torneio (Ryzen 7 5800X, 16 threads, 16 GB) isso dá 15 threads e 2048 MB. Valores
+  definidos por variável são limitados ao que a máquina tem (threads) e a 3/4 da RAM (hash). A largada mostra:
+  `Motor: 15 threads, 2048 MB de hash (...); ponder ligado.`
+- **Ponder (pensar no tempo do adversário):** enquanto o adversário pensa e o operador digita, o Stockfish
+  analisa a posição em segundo plano; quando o lance chega, o cálculo já está adiantado. Medido em 12
+  posições: no caso típico, um terço a menos de trabalho para a mesma profundidade (8 de 12 melhoraram).
+  Não mexe no relógio. Se o motor não parar em 1 s, ele é reiniciado. Desliga com `CAPABLANCA_PONDER=0`.
+- **Velocidade dos lances:** quem decide quanto tempo cada lance leva é o `tempo.py` (alvo e máximo). Mais
+  threads e o ponder deixam o lance mais preciso no mesmo tempo; para responder mais rápido, o alvo do
+  `tempo.py` precisa ser recalibrado com o simulador.
+
+### Variáveis de ambiente (opcionais)
+- `CAPABLANCA_THREADS`, `CAPABLANCA_HASH_MB`: threads e hash do Stockfish (use o que o verificador medir).
+- `CAPABLANCA_PONDER=0`: desliga o ponder.
+- `CAPABLANCA_ATRASO_HUMANO_S`: atraso humano, para não precisar digitar toda vez. No ensaio de 29/10 a
+  parte humana (falar + digitar) ficou em torno de **12 s por lance**; confirmar no ensaio com tabuleiro.
+- `CAPABLANCA_FOLGA_WATCHDOG_S`: folga do vigia do motor (ver abaixo). Sem ela o vigia fica desligado e o
+  programa avisa na largada.
+- `CAPABLANCA_TEMPO_PROVISORIO_S`: **só para testes**, usado quando o `tempo.py` não existe. Não vale no torneio.
+
+### Onde ficam os arquivos de cada partida
+Pasta `partidas/` (fora do Git): `AAAA-MM-DD_HH-MM-SS.txt` (log, uma linha por lance nosso com os 8 campos:
+número, cor, lance UCI, profundidade, nós, avaliação, PV, tempo gasto; lance de book entra com profundidade 0 e
+a palavra `book`) e `.pgn` (a partida inteira, salvo a cada lance).
+
+## Assistir o bot jogando (visualizador no navegador)
+```
+python ferramentas/assistir.py
+```
+Abre `http://127.0.0.1:8765` no navegador. Tem duas abas:
+
+**Jogar contra o bot** (padrão): você joga clicando nas peças (clique na peça e depois na casa; na promoção
+aparece a escolha da peça) **ou digitando o lance** no campo de texto, que aceita `e2e4` (UCI), `e4`/`Nf3`
+(inglês) e `Cf3`/`Txd5` (português) — útil quando você está copiando o lance de outra tela. O lance que o
+nosso bot jogou aparece em destaque, para você repetir do outro lado. Relógio de verdade correndo como nos
+sites (3+2, 5+3, 10+5, 15+10 do torneio ou 25+0), ou **sem limite de tempo**: nesse modo ninguém perde por
+bandeira, os relógios mostram `∞` e o bot pensa cerca de 7 s por lance (o `tempo.py` recebe sempre o mesmo
+relógio, então o ritmo não muda). Use o sem limite quando o relógio de verdade estiver em outro lugar — numa
+partida do Lichess ou no cronômetro da mesa — e a tela servir só de ponte. O nosso bot joga com o programa de verdade (book, `tempo.py`, ponder no seu tempo), então
+responde rápido no relógio curto e pensa mais no relógio longo. Do seu lado também pode jogar **o bot de
+outra máquina**: ele fala o lance e você mexe na tela. O atraso humano do bot vem em 0 s (na tela não há
+mesa); dá para simular a mesa com 6 ou 12 s.
+
+**Bot contra bot**: escolha o adversário (Stockfish com a gestão de tempo dele,
+bot fraco simulando um bot de aluno, ou tempo fixo), o relógio (rápido 3+2, que é o 15+10 em escala 0,2,
+ou o 15+10 real) e de que cor o nosso bot joga, e clique em **Nova partida**. A tela mostra o tabuleiro, os
+dois relógios correndo, a barra de avaliação, **o que o nosso bot está pensando** (profundidade, posições,
+avaliação e a linha principal), a lista de lances e o gráfico da avaliação.
+
+- É uma ferramenta de **teste e apresentação** (boa para a arguição). Nas partidas oficiais o programa da
+  mesa é o `partida.py`, no terminal.
+- Roda **sem internet**: o servidor só escuta no próprio computador (127.0.0.1) e a página não carrega nada
+  de fora. Pedidos vindos de outro endereço são recusados.
+- A partida é jogada pelo mesmo simulador dos confrontos: o nosso lado é o programa de verdade (com o
+  `tempo.py`), com atraso humano simulado de 12 s por lance (`--atraso-s` muda).
+
+## Regras do torneio e onde o código as garante
+| Regra | Onde |
+|---|---|
+| Tudo local, sem rede nem API durante as partidas | `partida.py`, `book.py` (só leem arquivos). Internet só nas ferramentas de preparação. |
+| Book só até o meio-lance 10 | `book.py` (duas travas: `ply < 10` e partida iniciada da posição inicial) e `partida.py` |
+| Tablebases só até 5 peças | `SyzygyProbeLimit=5` enviado ao motor em `partida.py`; `baixar_tablebases.py` recusa 6+ peças |
+| Lances sempre em UCI | `partida.py` |
+| Log com 8 campos e `flush` a cada lance | `log.py` |
+| Travou ou estourou o tempo = derrota | limite duro `Limit(time=...)` no motor, vigia, reinício e modo manual |
+| Dependências com versão fixa | `requirements.txt` |
+
+## Testes
+```
+pytest -q                                   # todos os testes
+python testes/torneio.py confronto --help   # simulador de partidas
+python testes/torneio.py estouro            # mede o estouro do motor (dado para a folga do vigia)
+python ferramentas/verificar_maquina.py     # confere o PC e mede as threads
+```
+O simulador joga partidas automáticas com **relógio simulado e atraso artificial**, com cinco versões do mesmo
+Stockfish: `nossa` (o programa de verdade, com `tempo.py`), `fixa` (tempo fixo por lance), `padrao` (a gestão
+de tempo do próprio Stockfish), `fraco` (Skill Level 3, simula um bot de aluno) e `lichess8` (ver abaixo).
+Alterna as cores e usa aberturas variadas. Mede vitórias, empates, derrotas, **derrotas por tempo** e o tempo
+que sobrou. O `--atraso-s` é obrigatório: não existe valor padrão.
+
+### Régua externa: o "nível 8" do Lichess
+A versão `lichess8` emula o mais forte dos 8 níveis do *jogar contra o computador* do Lichess: avaliação em
+força máxima (Skill Level 20, que é o padrão) com a **busca algemada em profundidade 22 e ~1 s por lance**.
+Esses são os valores que o Lichess passa ao Stockfish no **fishnet**, o programa que joga esses níveis.
+Conferidos no código-fonte dele, em `impl SkillLevel` de
+[`fishnet/src/api.rs`](https://github.com/lichess-org/fishnet/blob/master/src/api.rs), que para o nível 8
+devolve `skill_level() = 20`, `depth() = 22` e `time() = 1000 ms`. **Nenhuma linha de código do Lichess foi
+copiada**: a classe `JogadorLichess8` é nossa (5 linhas) e só passa esses dois limites ao mesmo Stockfish que
+o projeto já usa.
+
+Serve para responder, com placar, "o nosso bot é forte?" usando um adversário que qualquer um conhece e pode
+conferir, em vez de comparar o nosso código com ele mesmo. **O nosso bot não é limitado assim**: roda Skill
+Level 20 sem teto de profundidade, com ~10 s por lance, 15 threads, book e tablebases — ou seja, o nível 8 é a
+nossa régua, não a nossa meta.
 
 ```
-git switch main && git pull                 # começar sempre atualizado
-git switch -c sprint1/evaluation            # ex.: sprint1/book, sprint1/cli-logger
-# ... trabalhar, rodar os testes ...
-git add . && git commit -m "evaluation: material e tabelas de casas"
-git push -u origin sprint1/evaluation       # depois: Pull Request para a main no GitHub
+python testes/torneio.py confronto --a nossa --b lichess8 --perfil 15+10 \
+    --partidas 8 --atraso-s 12 --escala 0.2 --paralelo 4
 ```
+Os limites do `lichess8` são absolutos e **não entram na escala**: com `--escala` baixa o nosso lado pensa
+menos e o adversário continua inteiro, então o teste fica mais difícil para nós, nunca mais fácil.
 
-**Entrega final:** repositório para **icev@somosicev.com** até **04/11/2026**.
+Duas ressalvas, para a comparação ser defendida com honestidade: a emulação copia a **algema** (Skill Level,
+profundidade e tempo), não o servidor do Lichess, que tem hardware diferente; e no simulador os dois motores
+recebem as tablebases, enquanto o Lichess não as usa nesses níveis. As duas ressalvas pesam **contra** nós
+(o adversário emulado fica um pouco mais forte que o original), então o placar é um piso, não um teto.
+
+## Resultados dos testes (para a arguição)
+Medidos com `testes/torneio.py` (29/10): `nossa` x `padrao` (a gestão de tempo do próprio Stockfish), perfil
+15+10, escala 0,1, **atraso humano de 12 s** (medido no ensaio entre dois computadores), 8 partidas por linha,
+cores alternadas, 1 thread, 16 MB. Arquivos completos (tabela, CSV e PGN) em `testes/resultados/`.
+
+| Constantes do `tempo.py` (LANCES_ESPERADOS / MÍNIMO) | Nossa: V-E-D | Pontos nossa x padrão | Nossas derrotas por tempo | Derrotas por tempo do padrão | Arquivo |
+|---|---|---|---|---|---|
+| 70 / 40 (valor inicial) | 5-3-0 | 6,5 x 1,5 | 0 | 5 | `velocidade_atual.md` |
+| **100 / 55 (escolhido)** | 6-2-0 | 7 x 1 | 0 | 6 | `velocidade_rapida.md` |
+| 130 / 70 | 6-2-0 | 7 x 1 | 0 | 6 | `velocidade_muito_rapida.md` |
+
+Leitura: o mesmo Stockfish, com a gestão de tempo dele, perde por tempo quando a mesa gasta 12 s por lance,
+porque ele não sabe desse atraso; a nossa gestão desconta o atraso e não perdeu nenhuma partida por tempo.
+Entre 70/40 e 100/55 a diferença de pontos é pequena demais para 8 partidas; o 100/55 foi escolhido por
+responder cerca de um terço mais rápido sem perder por tempo.
+
+## Prazos
+Congelar o código: 02/11. Envio do Git para icev@somosicev.com: 04/11/2026. Ensaio geral: 05/11. Torneio: 06/11.
